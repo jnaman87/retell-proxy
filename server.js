@@ -238,16 +238,39 @@ app.post('/create-agent', async (req, res) => {
   }
 
   try {
-    const response = await fetch(`${RETELL_BASE}/create-agent`, {
+    // Step 1 — Create the LLM (prompt + tools)
+    const llmRes = await fetch(`${RETELL_BASE}/create-retell-llm`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model:          'gpt-4o-mini',
+        general_prompt:  buildSystemPrompt({ businessName, city, niche, tagline, coreServices }),
+        begin_message:   buildBeginMessage(businessName),
+        general_tools:   buildTools(),
+      }),
+    });
+
+    const llmRaw = await llmRes.text();
+    console.log('Retell LLM status:', llmRes.status);
+    console.log('Retell LLM response:', llmRaw.slice(0, 500));
+
+    let llmData;
+    try { llmData = JSON.parse(llmRaw); }
+    catch (e) { return res.status(500).json({ error: 'LLM creation returned non-JSON. Check logs.' }); }
+
+    if (!llmRes.ok) return res.status(llmRes.status).json({ error: llmData });
+
+    const llmId = llmData.llm_id;
+
+    // Step 2 — Create the agent referencing the LLM
+    const agentRes = await fetch(`${RETELL_BASE}/create-agent`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         agent_name: `${businessName} — ${city} AI Receptionist`,
         response_engine: {
-          type:           'retell-llm',
-          general_prompt:  buildSystemPrompt({ businessName, city, niche, tagline, coreServices }),
-          begin_message:   buildBeginMessage(businessName),
-          general_tools:   buildTools(),
+          type:   'retell-llm',
+          llm_id:  llmId,
         },
         voice_id:           'eleven_labs-Rachel',
         language:           'en-US',
@@ -257,19 +280,16 @@ app.post('/create-agent', async (req, res) => {
       }),
     });
 
-    const rawText = await response.text();
-    console.log('Retell status:', response.status);
-    console.log('Retell raw response:', rawText.slice(0, 500));
+    const agentRaw = await agentRes.text();
+    console.log('Retell Agent status:', agentRes.status);
+    console.log('Retell Agent response:', agentRaw.slice(0, 500));
 
-    let data;
-    try {
-      data = JSON.parse(rawText);
-    } catch (parseErr) {
-      return res.status(500).json({ error: 'Retell returned non-JSON. Check Railway logs for the raw response.' });
-    }
+    let agentData;
+    try { agentData = JSON.parse(agentRaw); }
+    catch (e) { return res.status(500).json({ error: 'Agent creation returned non-JSON. Check logs.' }); }
 
-    if (!response.ok) return res.status(response.status).json({ error: data });
-    return res.json({ agentId: data.agent_id });
+    if (!agentRes.ok) return res.status(agentRes.status).json({ error: agentData });
+    return res.json({ agentId: agentData.agent_id });
 
   } catch (err) {
     console.error(err);
