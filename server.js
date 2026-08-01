@@ -440,11 +440,12 @@ const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
 
     // Flatten all days into a single slots array
     const slots = [];
-    for (const [date, daySlots] of Object.entries(data.slots || {})) {
-      if (Array.isArray(daySlots)) {
-        daySlots.forEach(s => slots.push({ date, ...s }));
-      }
-    }
+for (const [key, value] of Object.entries(data || {})) {
+  if (key === 'traceId') continue;
+  if (value && Array.isArray(value.slots)) {
+    value.slots.forEach(slotTime => slots.push({ date: key, startTime: slotTime }));
+  }
+}
 
     return res.json({ success: true, slots, raw: data });
 
@@ -499,28 +500,21 @@ const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
       return res.status(crmRes.status).json({ error: 'Slot check failed', details: data });
     }
 
-    const daySlots  = (data.slots || {})[date] || [];
-    const requested = time.slice(0, 5); // normalise to HH:MM
+    const dayData   = data[date];
+const daySlots  = (dayData && Array.isArray(dayData.slots)) ? dayData.slots : [];
+const requested = time.slice(0, 5);
 
-    const match = daySlots.find(slot => {
-      if (!slot.startTime) return false;
-      // GHL can return ISO strings or bare HH:MM — handle both
-      const raw = slot.startTime;
-      const slotHHMM = raw.length > 5
-        ? new Date(raw).toLocaleTimeString('en-GB', {
-            hour     : '2-digit',
-            minute   : '2-digit',
-            hour12   : false,
-            timeZone : timezone,
-          })
-        : raw.slice(0, 5);
-      return slotHHMM === requested;
-    });
+const match = daySlots.find(slotTime => {
+  const slotHHMM = new Date(slotTime).toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone,
+  });
+  return slotHHMM === requested;
+});
 
-    return res.json({
-      success   : true,
-      available : !!match,
-      slot      : match || null,
+return res.json({
+  success   : true,
+  available : !!match,
+  slot      : match ? { startTime: match } : null,
       date,
       time      : requested,
       timezone,
@@ -660,19 +654,20 @@ app.post('/retell-tools/check-availability', async (req, res) => {
       return res.json({ result: "I'm having trouble pulling up the calendar right now. Let me have someone follow up with you directly." });
     }
 
-    const daySlots = (data.slots || {})[date] || [];
+    const dayData  = data[date];
+const daySlots = (dayData && Array.isArray(dayData.slots)) ? dayData.slots : [];
 
-    if (daySlots.length === 0) {
+if (daySlots.length === 0) {
       const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
       return res.json({ result: `Unfortunately there are no openings on ${dateStr}. Would you like me to check another day?` });
     }
 
     // Format up to 5 slots as human-readable times
-    const formatted = daySlots.slice(0, 5).map(slot => {
-      return new Date(slot.startTime).toLocaleTimeString('en-US', {
-        hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
-      });
-    }).join(', ');
+    const formatted = daySlots.slice(0, 5).map(slotTime => {
+  return new Date(slotTime).toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
+  });
+}).join(', ');
 
     const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
