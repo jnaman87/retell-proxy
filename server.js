@@ -239,7 +239,7 @@ app.post('/create-agent', async (req, res) => {
   }
 
   try {
-    const response = await fetch(`${RETELL_BASE}/v2/create-agent`, {
+        const response = await fetch(`${RETELL_BASE}/v2/create-agent`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -250,13 +250,28 @@ app.post('/create-agent', async (req, res) => {
           begin_message:   buildBeginMessage(businessName),
           general_tools:   buildTools(),
         },
-        voice_id:           'eleven_labs-Rachel', // ← replace with your chosen voice ID from Retell
+        voice_id:           'eleven_labs-Rachel',
         language:           'en-US',
         enable_backchannel: true,
         ambient_sound:      'office',
         ...(contactId && { metadata: { crm_contact_id: contactId } }),
       }),
     });
+
+    // ← CHANGED: read as text first so we can log it if it’s not JSON
+    const rawText = await response.text();
+    console.log('Retell status:', response.status);
+    console.log('Retell raw response:', rawText.slice(0, 500));
+
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch (parseErr) {
+      return res.status(500).json({ error: 'Retell returned non-JSON. Check Railway logs for the raw response.' });
+    }
+
+    if (!response.ok) return res.status(response.status).json({ error: data });
+    return res.json({ agentId: data.agent_id });
 
     const data = await response.json();
     if (!response.ok) return res.status(response.status).json({ error: data });
