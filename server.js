@@ -130,10 +130,34 @@ PRICING (only if asked about the AI receptionist service):
 • Do NOT negotiate or discount pricing on this call
 
 BOOKING A DISCOVERY CALL:
-If the prospect (business owner or decision-maker) wants to learn more or get started:
-→ Say: "Fantastic! On this demo page there's a 'Book a Discovery Call' button — just click it
-   and you can grab a time that works for you. It only takes about a minute."
-→ IMPORTANT: Do NOT try to collect their availability yourself. Always direct them to the button on the page.
+When a prospect wants to schedule a discovery call, follow these steps IN ORDER — do not skip ahead.
+
+STEP 1 — COLLECT THEIR DETAILS FIRST (before touching the calendar):
+   Ask for: first name → last name → email address → phone (optional, skip if they hesitate)
+   Do this conversationally, one question at a time.
+
+STEP 2 — ASK THEIR PREFERENCE:
+   "Do you have a day in mind, or would you like me to check what's available?"
+   → If they give a day: call check_availability with that date
+   → If they want options: call check_availability for the next business day
+
+STEP 3 — PRESENT THE SLOTS NATURALLY:
+   "I've got openings at 10am, 2pm, and 4pm on Tuesday — which of those works for you?"
+
+STEP 4 — CONFIRM BEFORE BOOKING:
+   Repeat the chosen time back: "Perfect — so that's [TIME] on [DATE]. Let me get that locked in."
+   Then call book_appointment with all collected details.
+
+STEP 5 — AFTER BOOKING CONFIRMS:
+   Read back the confirmation warmly.
+   Remind them a confirmation email is on its way.
+   Then close the call with the sign-off.
+
+IMPORTANT RULES:
+→ Never call book_appointment without first having: firstName, lastName, email, and startTime
+→ Never fabricate a time — always check_availability first
+→ If a booking fails, direct them to the page button as a backup — do not give up
+`;
 
 WHAT YOU NEVER DO:
 • Process payments or collect card information
@@ -195,11 +219,52 @@ app.post('/create-agent', async (req, res) => {
 
   try {
     const llmBody = {
-      model          : 'gpt-4o',
-      general_prompt : systemPrompt,
-      begin_message  : beginMessage,
-      general_tools  : [{ type: 'end_call', name: 'end_call' }],
-    };
+  model          : 'gpt-4o',
+  general_prompt : systemPrompt,
+  begin_message  : beginMessage,
+  general_tools  : [
+    {
+      type : 'end_call',
+      name : 'end_call',
+    },
+    {
+      type                         : 'custom',
+      name                         : 'check_availability',
+      description                  : 'Check what appointment slots are available on a given date. Call this when the prospect wants to book a discovery call and you need to find available times.',
+      speak_during_execution       : true,
+      execution_message_description: 'Let me check the calendar for you.',
+      url                          : `${RAILWAY_PUBLIC_URL}/retell-tools/check-availability`,
+      parameters : {
+        type       : 'object',
+        properties : {
+          date     : { type: 'string', description: 'Date to check in YYYY-MM-DD format' },
+          timezone : { type: 'string', description: "Caller's timezone as IANA string e.g. America/Chicago" },
+        },
+        required : ['date'],
+      },
+    },
+    {
+      type                         : 'custom',
+      name                         : 'book_appointment',
+      description                  : 'Book a 30-minute discovery call. Only call this after you have confirmed the exact time with the prospect and collected their name and email.',
+      speak_during_execution       : true,
+      execution_message_description: 'Perfect, let me get that locked in for you right now.',
+      url                          : `${RAILWAY_PUBLIC_URL}/retell-tools/book-appointment`,
+      parameters : {
+        type       : 'object',
+        properties : {
+          firstName : { type: 'string', description: "Prospect's first name" },
+          lastName  : { type: 'string', description: "Prospect's last name" },
+          email     : { type: 'string', description: "Prospect's email address" },
+          phone     : { type: 'string', description: "Prospect's phone number (optional)" },
+          startTime : { type: 'string', description: 'Confirmed start time in ISO 8601 format e.g. 2026-08-05T14:00:00-05:00' },
+          timezone  : { type: 'string', description: "Prospect's IANA timezone" },
+        },
+        required : ['firstName', 'lastName', 'email', 'startTime'],
+      },
+    },
+  ],
+};
 
     console.log('[create-agent] LLM payload:', JSON.stringify(llmBody, null, 2));
 
@@ -561,6 +626,132 @@ app.post('/book-appointment', async (req, res) => {
   } catch (e) {
     console.error('[book-appointment] Exception:', e.message);
     return res.status(500).json({ error: 'Exception', message: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RETELL TOOL WEBHOOK — POST /retell-tools/check-availability
+// Called by Retell LLM during a live call when agent needs available slots
+// Body from Retell: { call_id, name, arguments: { date, timezone } }
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/retell-tools/check-availability', async (req, res) => {
+  const args     = req.body.arguments || {};
+  const date     = args.date;
+  const timezone = args.timezone || 'America/New_York';
+
+  if (!date) {
+    return res.json({ result: "I couldn't determine the date. Could you tell me which day you had in mind?" });
+  }
+
+  try {
+    const nextDay = new Date(`${date}T12:00:00Z`);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    const endDate = nextDay.toISOString().split('T')[0];
+
+    const startTs = new Date(date).getTime();
+    const endTs   = new Date(endDate).getTime();
+
+    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
+      `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
+
+    const crmRes = await fetch(url, {
+      headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15' },
+    });
+    const data = await crmRes.json();
+
+    if (!crmRes.ok) {
+      return res.json({ result: "I'm having trouble pulling up the calendar right now. Let me have someone follow up with you directly." });
+    }
+
+    const daySlots = (data.slots || {})[date] || [];
+
+    if (daySlots.length === 0) {
+      const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      return res.json({ result: `Unfortunately there are no openings on ${dateStr}. Would you like me to check another day?` });
+    }
+
+    // Format up to 5 slots as human-readable times
+    const formatted = daySlots.slice(0, 5).map(slot => {
+      return new Date(slot.startTime).toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
+      });
+    }).join(', ');
+
+    const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+    return res.json({ result: `On ${dateStr} I have openings at: ${formatted}. Which of those works best for you?` });
+
+  } catch (e) {
+    console.error('[retell-tools/check-availability] Exception:', e.message);
+    return res.json({ result: "I'm having trouble with the calendar right now. Let me have someone reach out to confirm a time." });
+  }
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RETELL TOOL WEBHOOK — POST /retell-tools/book-appointment
+// Called by Retell LLM during a live call to book the confirmed slot
+// Body from Retell: { call_id, name, arguments: { firstName, lastName, email, phone, startTime, timezone } }
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/retell-tools/book-appointment', async (req, res) => {
+  const args      = req.body.arguments || {};
+  const { firstName, lastName, email, phone = '', startTime, timezone = 'America/New_York' } = args;
+
+  // Check we have everything we need
+  const missing = [];
+  if (!firstName) missing.push('first name');
+  if (!lastName)  missing.push('last name');
+  if (!email)     missing.push('email address');
+  if (!startTime) missing.push('the appointment time');
+
+  if (missing.length) {
+    return res.json({ result: `I still need your ${missing.join(' and ')} to complete the booking. Could you share that?` });
+  }
+
+  try {
+    const endTime = (() => {
+      const d = new Date(startTime);
+      d.setMinutes(d.getMinutes() + 30);
+      return d.toISOString();
+    })();
+
+    const payload = {
+      calendarId  : CRM_CALENDAR_ID,
+      locationId  : CRM_LOCATION_ID,
+      contactInfo : { firstName, lastName, email, phone, timezone },
+      startTime,
+      endTime,
+    };
+
+    const crmRes = await fetch(`${CRM_API}/calendars/events/appointments`, {
+      method  : 'POST',
+      headers : {
+        Authorization  : `Bearer ${CRM_API_KEY}`,
+        Version        : '2021-04-15',
+        'Content-Type' : 'application/json',
+      },
+      body : JSON.stringify(payload),
+    });
+
+    const data = await crmRes.json();
+
+    if (!crmRes.ok) {
+      console.error('[retell-tools/book-appointment] GHL error:', JSON.stringify(data, null, 2));
+      return res.json({ result: "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot." });
+    }
+
+    const timeStr = new Date(startTime).toLocaleString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
+    });
+
+    return res.json({
+      result: `You're all booked, ${firstName}! Your discovery call is confirmed for ${timeStr}. A confirmation will be sent to ${email}. We're looking forward to speaking with you!`,
+    });
+
+  } catch (e) {
+    console.error('[retell-tools/book-appointment] Exception:', e.message);
+    return res.json({ result: "Something went wrong on my end. Please use the 'Book a Discovery Call' button on the page and we'll get you sorted." });
   }
 });
 
