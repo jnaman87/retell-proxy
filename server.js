@@ -1,480 +1,583 @@
-const express = require('express');
-const cors    = require('cors');
-const app     = express();
-app.use(cors());
+'use strict';
+
+/**
+ * Creative Copyz — AI Voice Receptionist Proxy
+ * Deploy on Railway | Requires Node 18+
+ *
+ * Endpoints:
+ *   GET  /                     → health check + env status
+ *   POST /create-agent         → create Retell LLM + Agent (2-step)
+ *   POST /create-web-call      → create Retell web call token
+ *   GET  /check-availability   → fetch free calendar slots
+ *   GET  /check-specific-time  → check if a specific slot is free
+ *   POST /book-appointment     → book a GHL calendar appointment
+ */
+
+const express  = require('express');
+const cors     = require('cors');
+const fetch    = require('node-fetch'); // v2 — CommonJS compatible
+
+const app  = express();
+const PORT = process.env.PORT || 3000;
+
+// ─── Environment ──────────────────────────────────────────────────────────────
+const RETELL_API_KEY    = process.env.RETELL_API_KEY;
+const CRM_API_KEY       = process.env.CRM_API_KEY;
+const CRM_CALENDAR_ID   = process.env.CRM_CALENDAR_ID;
+const CRM_LOCATION_ID   = process.env.CRM_LOCATION_ID   || 'dImqkGzlWhmVksSXL1WY';
+const RAILWAY_PUBLIC_URL = process.env.RAILWAY_PUBLIC_URL;
+
+const RETELL  = 'https://api.retellai.com';
+const CRM_API = 'https://services.leadconnectorhq.com';
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// ── Environment variables ─────────────────────────────────────────────────────
-const RETELL_API_KEY  = process.env.RETELL_API_KEY;
-const RETELL_BASE     = 'https://api.retellai.com';
-const CRM_API_KEY     = process.env.CRM_API_KEY;
-const CRM_CALENDAR_ID = process.env.CRM_CALENDAR_ID;
-const CRM_LOCATION_ID = process.env.CRM_LOCATION_ID;
-const CRM_BASE        = 'https://services.leadconnectorhq.com';
-const RAILWAY_URL     = process.env.RAILWAY_PUBLIC_URL;
+// Request logger
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
 
-// ── City / timezone map ───────────────────────────────────────────────────────
-const CITY_TZ = {
-  houston:       'America/Chicago',
-  dallas:        'America/Chicago',
-  'fort worth':  'America/Chicago',
-  'san antonio': 'America/Chicago',
-  austin:        'America/Chicago',
-  nashville:     'America/Chicago',
-  phoenix:       'America/Phoenix',
-  atlanta:       'America/New_York',
-  charlotte:     'America/New_York',
-  miami:         'America/New_York',
-  orlando:       'America/New_York',
-  tampa:         'America/New_York',
-  raleigh:       'America/New_York',
-  toronto:       'America/Toronto',
-  denver:        'America/Denver',
-  'las vegas':   'America/Los_Angeles',
-  calgary:       'America/Edmonton',
-  vancouver:     'America/Vancouver',
-  sydney:        'Australia/Sydney',
-  melbourne:     'Australia/Melbourne',
-  brisbane:      'Australia/Brisbane',
-  eastern:       'America/New_York',
-  central:       'America/Chicago',
-  mountain:      'America/Denver',
-  pacific:       'America/Los_Angeles',
-  est:           'America/New_York',
-  cst:           'America/Chicago',
-  mst:           'America/Denver',
-  pst:           'America/Los_Angeles',
-};
-
-function resolveTimezone(input) {
-  if (!input) return 'America/New_York';
-  return CITY_TZ[input.toLowerCase().trim()] || 'America/New_York';
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function formatSlot(epochMs, timezone) {
-  return new Date(epochMs).toLocaleString('en-US', {
-    timeZone: timezone,
-    weekday:  'long',
-    month:    'long',
-    day:      'numeric',
-    hour:     'numeric',
-    minute:   '2-digit',
-    hour12:   true,
-  });
-}
-
-function getHourInTimezone(epochMs, timezone) {
-  return parseInt(
-    new Date(epochMs).toLocaleString('en-US', { timeZone: timezone, hour: '2-digit', hour12: false }),
-    10
-  );
-}
-
-function isWithinBusinessHours(epochMs, timezone) {
-  const hour = getHourInTimezone(epochMs, timezone);
-  return hour >= 9 && hour < 19;
-}
-
-function parseGHLSlots(slotsData, timezone, maxSlots = 20) {
-  const dateMap = slotsData?._dates_ || slotsData?.dates || {};
-  const result  = [];
-  for (const [dateStr, dateObj] of Object.entries(dateMap)) {
-    for (const slot of (dateObj?.slots || [])) {
-      let startEpoch;
-      if (typeof slot === 'number')                             startEpoch = slot;
-      else if (typeof slot === 'string' && slot.includes('T')) startEpoch = new Date(slot).getTime();
-      else                                                      startEpoch = new Date(`${dateStr}T${slot}`).getTime();
-      if (!isNaN(startEpoch)) result.push({ startTime: startEpoch, endTime: startEpoch + 30 * 60 * 1000 });
-      if (result.length >= maxSlots) return result;
-    }
+// ─── Helper: guard missing env vars ───────────────────────────────────────────
+function guardEnv(varName, res) {
+  if (!process.env[varName] && varName !== 'CRM_LOCATION_ID') {
+    res.status(500).json({ error: `Server misconfiguration: ${varName} is not set` });
+    return false;
   }
-  return result;
+  return true;
 }
 
-// ── System prompt builder ─────────────────────────────────────────────────────
-function buildSystemPrompt({ businessName, city, niche, tagline, coreServices }) {
-  const serviceList = coreServices
-    ? coreServices.split(',').map(s => `  - ${s.trim()}`).join('\n')
-    : '  - 24/7 emergency response';
+// ─── Health check ─────────────────────────────────────────────────────────────
+app.get('/', (_req, res) => {
+  res.json({
+    service : 'Creative Copyz — Voice AI Proxy',
+    status  : 'ok',
+    ts      : new Date().toISOString(),
+    config  : {
+      RETELL_API_KEY     : RETELL_API_KEY     ? '✅ set' : '❌ MISSING',
+      CRM_API_KEY        : CRM_API_KEY        ? '✅ set' : '❌ MISSING',
+      CRM_CALENDAR_ID    : CRM_CALENDAR_ID    ? '✅ set' : '❌ MISSING',
+      CRM_LOCATION_ID    : CRM_LOCATION_ID,
+      RAILWAY_PUBLIC_URL : RAILWAY_PUBLIC_URL || '(not set — optional)',
+    },
+  });
+});
 
-  const todayLabel = new Date().toLocaleDateString('en-US', {
-    timeZone: 'UTC', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+// ─── System prompt builder ────────────────────────────────────────────────────
+function buildSystemPrompt({ bizName, city, focus, tagline, coreServices, niche }) {
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday : 'long',
+    year    : 'numeric',
+    month   : 'long',
+    day     : 'numeric',
   });
 
-  return `
-TODAY'S DATE: ${todayLabel} (use this to resolve day names like "Thursday" into actual calendar dates)
+  const bn = bizName      || 'the business';
+  const ct = city         || 'your area';
+  const ni = niche        || 'emergency services';
+  const fo = focus        || ni;
+  const tg = tagline      || 'Always ready when you need us most';
+  const cs = coreServices || '24/7 emergency response, rapid dispatch, on-site support';
 
-YOU ARE: An AI voice receptionist demo built specifically for ${businessName}, a ${niche} business in ${city}.
+  return `You are Emma, an AI voice receptionist demo built for ${bn} — a ${ni} company serving ${ct}.
 
-BUSINESS PROFILE:
-  - Name: ${businessName}
-  - City: ${city}
-  - Tagline: "${tagline || '24/7 Emergency Service'}"
-  - Core services:\n${serviceList}
+Today's date is ${today}.
 
-YOUR PURPOSE:
-You are demonstrating what a fully operational AI receptionist would sound like for ${businessName}.
-The caller is the business owner or a key decision-maker evaluating this service.
-Act as if you are already THEIR live receptionist — professional, warm, and knowledgeable about their services.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BUSINESS PROFILE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Business Name : ${bn}
+City / Market : ${ct}
+Niche         : ${ni}
+Specialty     : ${fo}
+Tagline       : "${tg}"
+Core Services : ${cs}
 
-CALL FLOW:
-1. Greet warmly using the business name. Introduce yourself as their AI receptionist.
-2. Handle any inquiry naturally — treat it as a real call for their business type.
-3. Reference their specific services and city to build credibility.
-4. When they are ready, invite them to book a discovery call to set this up for real.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+YOUR ROLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You are an AI demo showing ${bn} what an always-on AI receptionist would sound like for their business.
+You handle inbound calls professionally, answer questions about the business, and guide serious
+prospects to book a discovery call. You are NOT a real employee — you are demonstrating the technology.
 
-BOOKING FLOW (follow this exact sequence every time):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PERSONALITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Warm, calm, confident — never robotic, never rushed
+• Industry-fluent — use terminology natural to ${ni}
+• Steady under pressure — emergency callers need a composed voice, not panic
+• Concise — give the caller what they need and move things forward
 
-STEP 1: Ask "What city or timezone are you calling from?"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CALL FLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-STEP 2: Call check_availability with their timezone/city.
-         It returns slots already filtered to 9am–7pm in their local time.
-         Offer them up to 3 of those options.
+OPENING (always start with):
+"Thank you for calling ${bn}, this is Emma. How can I help you today?"
 
-STEP 3A — If they choose one of your offered slots:
-  → Collect their name and email address.
-  → Call book_appointment using the exact startTime and endTime from the slot.
-  → Say: "You'll receive an email confirmation shortly. Have a wonderful day!"
-  → Call end_call immediately. Do NOT ask "Is there anything else I can help you with?"
+DURING THE CALL:
+1. Listen and identify what the caller needs
+2. Emergency / service request → acknowledge urgency, confirm you're capturing details and escalating
+3. General inquiry → answer helpfully using the business profile above
+4. Prospect / business owner asking about the AI service → move to booking flow (see below)
 
-STEP 3B — If they request a different time not in your offered list:
-  → Convert their request to a date (YYYY-MM-DD) and time (HH:MM, 24-hour).
-     Example: "Thursday at 2pm" → date_str="2026-08-06", time_str="14:00"
-  → Call check_specific_time with that date, time, and their timezone.
-  → If available = true: collect name + email → call book_appointment → confirm → call end_call.
-  → If available = false: offer the 2 alternatives returned → once they pick, collect name + email → book → confirm → call end_call.
+PRICING (only if asked about the AI receptionist service):
+• $497 per month — month-to-month, no long-term contracts
+• Covers full setup, voice customisation, calendar integration, and ongoing support
+• Standard carrier charges apply for any outbound calls (varies by usage volume)
+• Do NOT negotiate or discount pricing on this call
 
-NEVER invent or guess a time slot. Only book times confirmed as available by the tools.
-NEVER ask "Is there anything else I can help you with?" — end the call after the booking confirmation.
+BOOKING A DISCOVERY CALL:
+If the prospect (business owner or decision-maker) wants to learn more or get started:
+→ Say: "Fantastic! On this demo page there's a 'Book a Discovery Call' button — just click it
+   and you can grab a time that works for you. It only takes about a minute."
+→ IMPORTANT: Do NOT try to collect their availability yourself. Always direct them to the button on the page.
 
-PRICING (only if asked — do not bring up unprompted):
-"This service is $497 per month. That does not include carrier charges — those are the actual cost of phone minutes and SMS billed at usage. Everything else, including setup, the AI, ongoing updates, and support, is covered. Want to book a quick call to go over what's included?"
+WHAT YOU NEVER DO:
+• Process payments or collect card information
+• Make guarantees about real emergency response times (this is a demo)
+• Fabricate information not included in the business profile above
+• Say "As an AI..." or break the demo immersion unnecessarily
 
-TONE: Calm, professional, empathetic. Short sentences. Never robotic.
-Never say you are an AI unless directly asked.
-`.trim();
-}
+CLOSING:
+When the conversation reaches a natural end —
+→ Thank them warmly
+→ Remind them: "The 'Book a Discovery Call' button is right there on the page whenever you're ready."
+→ Sign off: "Have a wonderful day — and remember, your business never has to miss another call."
+→ End the call gracefully.
 
-function buildBeginMessage(businessName) {
-  return `Thank you for calling ${businessName}! I'm Emma, your AI receptionist. How can I help you today?`;
-}
-
-// ── Retell tool definitions ───────────────────────────────────────────────────
-function buildTools() {
-  return [
-    {
-      type:        'webhook',
-      name:        'check_availability',
-      description: 'Check available discovery call slots in the prospect\'s timezone. Returns up to 6 slots filtered to between 9am and 7pm local time. Call this first before offering any times.',
-      url:         `${RAILWAY_URL}/check-availability`,
-      speak_during_execution:   true,
-      execution_message_during: 'Let me check what times are available for you right now.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          timezone_or_city: { type: 'string', description: 'The caller\'s city (e.g. "Houston") or timezone label (e.g. "Eastern", "CST").' },
-        },
-        required: ['timezone_or_city'],
-      },
-    },
-    {
-      type:        'webhook',
-      name:        'check_specific_time',
-      description: 'Check if a specific date and time requested by the prospect is available. If not, returns 2 closest available alternatives within business hours. Use this when the prospect requests a time different from the options you offered.',
-      url:         `${RAILWAY_URL}/check-specific-time`,
-      speak_during_execution:   true,
-      execution_message_during: 'Let me check if that time works.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          date_str: { type: 'string', description: 'Requested date in YYYY-MM-DD format. Calculate from TODAY\'S DATE in your context.' },
-          time_str: { type: 'string', description: 'Requested time in HH:MM 24-hour format. E.g. "2pm" = "14:00".' },
-          timezone: { type: 'string', description: 'IANA timezone string from the earlier check_availability response.' },
-        },
-        required: ['date_str', 'time_str', 'timezone'],
-      },
-    },
-    {
-      type:        'webhook',
-      name:        'book_appointment',
-      description: 'Book the discovery call at the exact slot the prospect has confirmed. Use the startTime and endTime values returned by check_availability or check_specific_time.',
-      url:         `${RAILWAY_URL}/book-appointment`,
-      speak_during_execution:   true,
-      execution_message_during: 'Booking that for you now — just a moment.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          prospect_name:   { type: 'string', description: 'Full name of the prospect' },
-          prospect_email:  { type: 'string', description: 'Email address of the prospect' },
-          business_name:   { type: 'string', description: 'Name of the business they represent' },
-          slot_label:      { type: 'string', description: 'Human-readable label of the chosen slot' },
-          start_time:      { type: 'number', description: 'Epoch milliseconds for slot start' },
-          end_time:        { type: 'number', description: 'Epoch milliseconds for slot end' },
-          timezone:        { type: 'string', description: 'IANA timezone of the prospect' },
-          crm_contact_id:  { type: 'string', description: 'CRM contact ID of the originating lead if known' },
-        },
-        required: ['prospect_name', 'prospect_email', 'business_name', 'start_time', 'end_time'],
-      },
-    },
-    {
-      type:        'end_call',
-      name:        'end_call',
-      description: 'End the call. Call ONLY after confirming the booking and saying: "You will receive an email confirmation shortly. Have a wonderful day!"',
-    },
-  ];
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TONE GUARDRAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Professional, warm, confident
+✅ Emergency-ready — steady, reassuring voice under pressure
+✅ Solution-focused — move conversations forward
+❌ Never condescending or scripted-sounding
+❌ Never flustered or over-apologetic`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-agent
-// Body: { businessName, city, niche, tagline, coreServices, contactId }
-// Returns: { agentId }
+//
+// Body (all optional except where noted):
+//   bizName      {string}  — business name
+//   city         {string}  — city / market
+//   niche        {string}  — industry niche (e.g. "Towing Companies")
+//   focus        {string}  — specialty focus within niche
+//   tagline      {string}  — business tagline
+//   coreServices {string}  — comma-separated core services
+//   voiceId      {string}  — Retell voice ID (default: "retell-Cimo")
+//
+// Returns: { success, agentId, llmId, agentName }
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/create-agent', async (req, res) => {
-  const { businessName, city, niche, tagline, coreServices, contactId } = req.body;
+  if (!guardEnv('RETELL_API_KEY', res)) return;
 
-  if (!businessName || !city || !niche) {
-    return res.status(400).json({ error: 'businessName, city, and niche are required' });
-  }
+  const {
+    bizName      = '',
+    city         = '',
+    focus        = '',
+    tagline      = '',
+    coreServices = '',
+    niche        = '',
+    voiceId      = 'retell-Cimo', // ← swap this from your Retell dashboard after first test
+  } = req.body;
+
+  const systemPrompt = buildSystemPrompt({ bizName, city, focus, tagline, coreServices, niche });
+  const beginMessage = `Thank you for calling ${bizName || 'us'}, this is Emma. How can I help you today?`;
+
+  // ── STEP 1: Create Retell LLM ─────────────────────────────────────────────
+  console.log('[create-agent] Step 1: Creating Retell LLM…');
+
+  let llmId, llmWsUrl;
 
   try {
-    const response = await fetch(`${RETELL_BASE}/create-agent`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        agent_name: `${businessName} — ${city} AI Receptionist`,
-        response_engine: {
-          type:           'retell-llm',
-          general_prompt:  buildSystemPrompt({ businessName, city, niche, tagline, coreServices }),
-          begin_message:   buildBeginMessage(businessName),
-          general_tools:   buildTools(),
-        },
-        voice_id:           'eleven_labs-Rachel',
-        language:           'en-US',
-        enable_backchannel: true,
-        ambient_sound:      'office',
-        ...(contactId && { metadata: { crm_contact_id: contactId } }),
-      }),
+    const llmBody = {
+      model          : 'gpt-4o',
+      general_prompt : systemPrompt,
+      begin_message  : beginMessage,
+      general_tools  : [{ type: 'end_call' }],
+    };
+
+    console.log('[create-agent] LLM payload:', JSON.stringify(llmBody, null, 2));
+
+    const llmRes  = await fetch(`${RETELL}/create-retell-llm`, {
+      method  : 'POST',
+      headers : {
+        Authorization  : `Bearer ${RETELL_API_KEY}`,
+        'Content-Type' : 'application/json',
+      },
+      body : JSON.stringify(llmBody),
     });
 
-    const rawText = await response.text();
-    console.log('Retell status:', response.status);
-    console.log('Retell raw response:', rawText.slice(0, 500));
+    const llmData = await llmRes.json();
+    console.log(`[create-agent] LLM response (${llmRes.status}):`, JSON.stringify(llmData, null, 2));
 
-    let data;
-    try {
-      data = JSON.parse(rawText);
-    } catch (parseErr) {
-      return res.status(500).json({ error: 'Retell returned non-JSON. Check Railway logs for the raw response.' });
+    if (!llmRes.ok) {
+      return res.status(llmRes.status).json({ error: 'LLM creation failed', details: llmData });
     }
 
-    if (!response.ok) return res.status(response.status).json({ error: data });
-    return res.json({ agentId: data.agent_id });
+    llmId    = llmData.llm_id;
+    llmWsUrl = llmData.llm_websocket_url;
+    console.log(`[create-agent] ✅ LLM created — id: ${llmId}, wsUrl: ${llmWsUrl}`);
 
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+  } catch (e) {
+    console.error('[create-agent] LLM exception:', e.message);
+    return res.status(500).json({ error: 'LLM creation threw an exception', message: e.message });
+  }
+
+  // ── STEP 2: Create Retell Agent ───────────────────────────────────────────
+  console.log('[create-agent] Step 2: Creating Retell Agent…');
+
+  try {
+    const agentBody = {
+      llm_websocket_url         : llmWsUrl,
+      voice_id                  : voiceId,
+      agent_name                : `${bizName || 'Demo'} — Emma (AI Receptionist)`,
+      language                  : 'en-US',
+      enable_backchannel        : true,
+      normalize_for_speech      : true,
+      end_call_after_silence_ms : 30000,   // 30 s silence → hang up
+      max_call_duration_ms      : 1800000, // 30 min hard cap
+      boosted_keywords          : [
+        'emergency', 'urgent', 'dispatch', 'available', 'help',
+        ...(niche ? [niche] : []),
+      ],
+    };
+
+    console.log('[create-agent] Agent payload:', JSON.stringify(agentBody, null, 2));
+
+    const agentRes  = await fetch(`${RETELL}/create-agent`, {
+      method  : 'POST',
+      headers : {
+        Authorization  : `Bearer ${RETELL_API_KEY}`,
+        'Content-Type' : 'application/json',
+      },
+      body : JSON.stringify(agentBody),
+    });
+
+    const agentData = await agentRes.json();
+    console.log(`[create-agent] Agent response (${agentRes.status}):`, JSON.stringify(agentData, null, 2));
+
+    if (!agentRes.ok) {
+      return res.status(agentRes.status).json({ error: 'Agent creation failed', details: agentData });
+    }
+
+    const agentId = agentData.agent_id;
+    console.log(`[create-agent] ✅ Agent created — id: ${agentId}`);
+
+    return res.json({
+      success   : true,
+      agentId,
+      llmId,
+      agentName : agentData.agent_name,
+    });
+
+  } catch (e) {
+    console.error('[create-agent] Agent exception:', e.message);
+    return res.status(500).json({ error: 'Agent creation threw an exception', message: e.message });
   }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-web-call
-// Body: { agentId }
-// Returns: { access_token }
+//
+// Body:
+//   agentId  {string} REQUIRED — Retell agent_id
+//   metadata {object} optional — pass-through metadata
+//
+// Returns: { success, accessToken, callId }
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/create-web-call', async (req, res) => {
-  const { agentId } = req.body;
-  if (!agentId) return res.status(400).json({ error: 'agentId required' });
+  if (!guardEnv('RETELL_API_KEY', res)) return;
 
-  try {
-    const response = await fetch(`${RETELL_BASE}/v2/create-web-call`, {
-      method:  'POST',
-      headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ agent_id: agentId }),
-    });
+  const { agentId, metadata = {} } = req.body;
 
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json({ error: data.message || 'Retell error' });
-    res.json({ access_token: data.access_token });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /check-availability
-// Body: { timezone_or_city }
-// Returns: { slots: [{ id, label, startTime, endTime }], timezone }
-// ─────────────────────────────────────────────────────────────────────────────
-app.post('/check-availability', async (req, res) => {
-  const { timezone_or_city } = req.body;
-  const timezone = resolveTimezone(timezone_or_city);
-
-  const start = new Date();
-  start.setDate(start.getDate() + 1);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
-
-  try {
-    const params = new URLSearchParams({
-      startDate: start.getTime().toString(),
-      endDate:   end.getTime().toString(),
-      timezone,
-    });
-
-    const slotsRes = await fetch(
-      `${CRM_BASE}/calendars/${CRM_CALENDAR_ID}/free-slots?${params}`,
-      { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15' } }
-    );
-
-    const slotsData = await slotsRes.json();
-    if (!slotsRes.ok) return res.json({ slots: [], timezone });
-
-    const filtered = parseGHLSlots(slotsData, timezone)
-      .filter(s => isWithinBusinessHours(s.startTime, timezone))
-      .slice(0, 6)
-      .map((s, i) => ({ id: i + 1, label: formatSlot(s.startTime, timezone), startTime: s.startTime, endTime: s.endTime }));
-
-    return res.json({ slots: filtered, timezone });
-
-  } catch (err) {
-    console.error(err);
-    res.json({ slots: [], timezone });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /check-specific-time
-// Body: { date_str, time_str, timezone }
-// Returns: { available, slot? } or { available: false, alternatives }
-// ─────────────────────────────────────────────────────────────────────────────
-app.post('/check-specific-time', async (req, res) => {
-  const { date_str, time_str, timezone } = req.body;
-  if (!date_str || !time_str || !timezone) {
-    return res.json({ available: false, alternatives: [], error: 'Missing required fields' });
+  if (!agentId) {
+    return res.status(400).json({ error: 'agentId is required' });
   }
 
-  const requestedEpoch = new Date(`${date_str}T${time_str}:00`).getTime();
-  const requestedHour  = getHourInTimezone(requestedEpoch, timezone);
-  const inHours        = requestedHour >= 9 && requestedHour < 19;
-
-  const windowStart = new Date(Math.max(requestedEpoch - 2 * 86400000, Date.now()));
-  windowStart.setHours(0, 0, 0, 0);
-  const windowEnd = new Date(requestedEpoch + 2 * 86400000);
-  windowEnd.setHours(23, 59, 59, 999);
-
   try {
-    const params = new URLSearchParams({
-      startDate: windowStart.getTime().toString(),
-      endDate:   windowEnd.getTime().toString(),
-      timezone,
+    const body = { agent_id: agentId, metadata };
+    console.log('[create-web-call] Payload:', JSON.stringify(body, null, 2));
+
+    const retellRes = await fetch(`${RETELL}/v2/create-web-call`, {
+      method  : 'POST',
+      headers : {
+        Authorization  : `Bearer ${RETELL_API_KEY}`,
+        'Content-Type' : 'application/json',
+      },
+      body : JSON.stringify(body),
     });
 
-    const slotsRes = await fetch(
-      `${CRM_BASE}/calendars/${CRM_CALENDAR_ID}/free-slots?${params}`,
-      { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15' } }
-    );
+    const data = await retellRes.json();
+    console.log(`[create-web-call] Response (${retellRes.status}):`, JSON.stringify(data, null, 2));
 
-    const slotsData = await slotsRes.json();
-    if (!slotsRes.ok) return res.json({ available: false, alternatives: [] });
-
-    const allSlots = parseGHLSlots(slotsData, timezone)
-      .filter(s => isWithinBusinessHours(s.startTime, timezone) && s.startTime > Date.now())
-      .map(s => ({ startTime: s.startTime, endTime: s.endTime, label: formatSlot(s.startTime, timezone) }));
-
-    const TOLERANCE_MS = 5 * 60 * 1000;
-    const exactMatch   = inHours && allSlots.find(s => Math.abs(s.startTime - requestedEpoch) <= TOLERANCE_MS);
-
-    if (exactMatch) {
-      return res.json({ available: true, slot: exactMatch });
+    if (!retellRes.ok) {
+      return res.status(retellRes.status).json({ error: 'Web call creation failed', details: data });
     }
 
-    const alternatives = allSlots
-      .sort((a, b) => Math.abs(a.startTime - requestedEpoch) - Math.abs(b.startTime - requestedEpoch))
-      .slice(0, 2);
-
+    console.log(`[create-web-call] ✅ Call created — id: ${data.call_id}`);
     return res.json({
-      available: false,
-      requested_label: inHours ? formatSlot(requestedEpoch, timezone) : `${time_str} (outside 9am–7pm window)`,
-      alternatives,
+      success     : true,
+      accessToken : data.access_token,
+      callId      : data.call_id,
     });
 
-  } catch (err) {
-    console.error(err);
-    res.json({ available: false, alternatives: [] });
+  } catch (e) {
+    console.error('[create-web-call] Exception:', e.message);
+    return res.status(500).json({ error: 'Exception', message: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /check-availability
+//
+// Query params:
+//   startDate {YYYY-MM-DD} REQUIRED
+//   endDate   {YYYY-MM-DD} REQUIRED
+//   timezone  {IANA string} optional — default: America/New_York
+//
+// Returns: { success, slots: [{ date, startTime, endTime, ... }] }
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/check-availability', async (req, res) => {
+  if (!guardEnv('CRM_API_KEY', res))     return;
+  if (!guardEnv('CRM_CALENDAR_ID', res)) return;
+
+  const { startDate, endDate, timezone = 'America/New_York' } = req.query;
+
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: 'startDate and endDate are required (YYYY-MM-DD)' });
+  }
+
+  try {
+    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
+      `?startDate=${encodeURIComponent(startDate)}` +
+      `&endDate=${encodeURIComponent(endDate)}` +
+      `&timezone=${encodeURIComponent(timezone)}`;
+
+    const crmRes = await fetch(url, {
+      headers : {
+        Authorization : `Bearer ${CRM_API_KEY}`,
+        Version       : '2021-04-15',
+      },
+    });
+
+    const data = await crmRes.json();
+    console.log(`[check-availability] Response (${crmRes.status}):`, JSON.stringify(data, null, 2));
+
+    if (!crmRes.ok) {
+      return res.status(crmRes.status).json({ error: 'Availability check failed', details: data });
+    }
+
+    // Flatten all days into a single slots array
+    const slots = [];
+    for (const [date, daySlots] of Object.entries(data.slots || {})) {
+      if (Array.isArray(daySlots)) {
+        daySlots.forEach(s => slots.push({ date, ...s }));
+      }
+    }
+
+    return res.json({ success: true, slots, raw: data });
+
+  } catch (e) {
+    console.error('[check-availability] Exception:', e.message);
+    return res.status(500).json({ error: 'Exception', message: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /check-specific-time
+//
+// Query params:
+//   date     {YYYY-MM-DD} REQUIRED
+//   time     {HH:MM}      REQUIRED  — 24-hr format in the given timezone
+//   timezone {IANA string} optional — default: America/New_York
+//
+// Returns: { success, available: bool, slot: object|null, date, time, timezone }
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/check-specific-time', async (req, res) => {
+  if (!guardEnv('CRM_API_KEY', res))     return;
+  if (!guardEnv('CRM_CALENDAR_ID', res)) return;
+
+  const { date, time, timezone = 'America/New_York' } = req.query;
+
+  if (!date || !time) {
+    return res.status(400).json({ error: 'date (YYYY-MM-DD) and time (HH:MM 24hr) are required' });
+  }
+
+  try {
+    // Fetch the requested day + next day (endDate is exclusive in GHL API)
+    const nextDay = new Date(`${date}T12:00:00Z`);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    const endDate = nextDay.toISOString().split('T')[0];
+
+    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
+      `?startDate=${encodeURIComponent(date)}` +
+      `&endDate=${encodeURIComponent(endDate)}` +
+      `&timezone=${encodeURIComponent(timezone)}`;
+
+    const crmRes = await fetch(url, {
+      headers : {
+        Authorization : `Bearer ${CRM_API_KEY}`,
+        Version       : '2021-04-15',
+      },
+    });
+
+    const data = await crmRes.json();
+
+    if (!crmRes.ok) {
+      return res.status(crmRes.status).json({ error: 'Slot check failed', details: data });
+    }
+
+    const daySlots  = (data.slots || {})[date] || [];
+    const requested = time.slice(0, 5); // normalise to HH:MM
+
+    const match = daySlots.find(slot => {
+      if (!slot.startTime) return false;
+      // GHL can return ISO strings or bare HH:MM — handle both
+      const raw = slot.startTime;
+      const slotHHMM = raw.length > 5
+        ? new Date(raw).toLocaleTimeString('en-GB', {
+            hour     : '2-digit',
+            minute   : '2-digit',
+            hour12   : false,
+            timeZone : timezone,
+          })
+        : raw.slice(0, 5);
+      return slotHHMM === requested;
+    });
+
+    return res.json({
+      success   : true,
+      available : !!match,
+      slot      : match || null,
+      date,
+      time      : requested,
+      timezone,
+    });
+
+  } catch (e) {
+    console.error('[check-specific-time] Exception:', e.message);
+    return res.status(500).json({ error: 'Exception', message: e.message });
   }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /book-appointment
-// Body: { prospect_name, prospect_email, business_name, slot_label,
-//         start_time, end_time, timezone, crm_contact_id }
-// Returns: { success, appointmentId, contactId }
+//
+// Body:
+//   firstName {string} REQUIRED
+//   lastName  {string} REQUIRED
+//   email     {string} REQUIRED
+//   startTime {ISO 8601 string} REQUIRED  — e.g. "2026-08-10T14:00:00-05:00"
+//   phone     {string} optional
+//   endTime   {ISO 8601 string} optional  — defaults to startTime + 30 min
+//   timezone  {IANA string} optional      — default: America/New_York
+//   notes     {string} optional
+//
+// Returns: { success, appointmentId, startTime, endTime, contactId }
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/book-appointment', async (req, res) => {
-  const { prospect_name, prospect_email, business_name, slot_label, start_time, end_time, timezone, crm_contact_id } = req.body;
+  if (!guardEnv('CRM_API_KEY', res))     return;
+  if (!guardEnv('CRM_CALENDAR_ID', res)) return;
 
-  if (!prospect_name || !prospect_email || !start_time || !end_time) {
-    return res.json({ success: false, message: 'Missing required booking details.' });
+  const {
+    firstName,
+    lastName,
+    email,
+    phone     = '',
+    startTime,
+    endTime,
+    timezone  = 'America/New_York',
+    notes     = '',
+  } = req.body;
+
+  // Validate required fields
+  const missing = [];
+  if (!firstName) missing.push('firstName');
+  if (!lastName)  missing.push('lastName');
+  if (!email)     missing.push('email');
+  if (!startTime) missing.push('startTime');
+
+  if (missing.length) {
+    return res.status(400).json({ error: 'Missing required fields', missing });
   }
 
+  // Resolve endTime — default: startTime + 30 min
+  const resolvedEndTime = endTime || (() => {
+    const d = new Date(startTime);
+    d.setMinutes(d.getMinutes() + 30);
+    return d.toISOString();
+  })();
+
+  const payload = {
+    calendarId  : CRM_CALENDAR_ID,
+    locationId  : CRM_LOCATION_ID,
+    contactInfo : { firstName, lastName, email, phone, timezone },
+    startTime,
+    endTime     : resolvedEndTime,
+    notes,
+  };
+
+  console.log('[book-appointment] Payload:', JSON.stringify(payload, null, 2));
+
   try {
-    let contactId = crm_contact_id || null;
-
-    if (!contactId) {
-      const [firstName, ...rest] = prospect_name.trim().split(' ');
-      const contactRes = await fetch(`${CRM_BASE}/contacts/`, {
-        method:  'POST',
-        headers: { Authorization: `Bearer ${CRM_API_KEY}`, 'Content-Type': 'application/json', Version: '2021-07-28' },
-        body: JSON.stringify({
-          locationId:  CRM_LOCATION_ID,
-          firstName,
-          lastName:    rest.join(' ') || '',
-          email:       prospect_email,
-          companyName: business_name || '',
-          tags:        ['demo_call_booked'],
-          timezone,
-        }),
-      });
-      const contactData = await contactRes.json();
-      contactId = contactData?.contact?.id;
-    }
-
-    const apptRes = await fetch(`${CRM_BASE}/calendars/events/appointments`, {
-      method:  'POST',
-      headers: { Authorization: `Bearer ${CRM_API_KEY}`, 'Content-Type': 'application/json', Version: '2021-04-15' },
-      body: JSON.stringify({
-        calendarId:        CRM_CALENDAR_ID,
-        locationId:        CRM_LOCATION_ID,
-        contactId,
-        title:             `Discovery Call — ${business_name || prospect_name}`,
-        startTime:         start_time,
-        endTime:           end_time,
-        appointmentStatus: 'new',
-        timezone,
-        notes:             `Booked via AI Voice Demo. Slot: ${slot_label || 'N/A'}.`,
-      }),
+    const crmRes = await fetch(`${CRM_API}/calendars/events/appointments`, {
+      method  : 'POST',
+      headers : {
+        Authorization  : `Bearer ${CRM_API_KEY}`,
+        Version        : '2021-04-15',
+        'Content-Type' : 'application/json',
+      },
+      body : JSON.stringify(payload),
     });
 
-    const apptData = await apptRes.json();
+    const data = await crmRes.json();
+    console.log(`[book-appointment] Response (${crmRes.status}):`, JSON.stringify(data, null, 2));
 
-    if (!apptRes.ok) {
-      console.error('Appointment creation failed:', apptData);
-      return res.json({ success: true, message: 'Contact saved. Calendar invite will follow via email.', contactId });
+    if (!crmRes.ok) {
+      return res.status(crmRes.status).json({ error: 'Booking failed', details: data });
     }
 
-    return res.json({ success: true, message: 'Discovery call booked.', appointmentId: apptData?.id, contactId });
+    const appointmentId = data.id || data.appointmentId;
+    console.log(`[book-appointment] ✅ Booked — id: ${appointmentId}`);
 
-  } catch (err) {
-    console.error(err);
-    return res.json({ success: true, message: 'Booking received. Confirmation coming shortly.' });
+    return res.json({
+      success       : true,
+      appointmentId,
+      startTime     : data.startTime,
+      endTime       : data.endTime,
+      contactId     : data.contactId,
+    });
+
+  } catch (e) {
+    console.error('[book-appointment] Exception:', e.message);
+    return res.status(500).json({ error: 'Exception', message: e.message });
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
+// ─── 404 catch-all ────────────────────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
+});
+
+// ─── Unhandled error handler ──────────────────────────────────────────────────
+app.use((err, _req, res, _next) => {
+  console.error('[UNHANDLED ERROR]', err);
+  res.status(500).json({ error: 'Unexpected server error', message: err.message });
+});
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+  console.log('\n=== Creative Copyz Voice AI Proxy ===');
+  console.log('Port              : ' + PORT);
+  console.log('RETELL_API_KEY    : ' + (RETELL_API_KEY    ? 'SET' : 'MISSING - set in Railway env vars'));
+  console.log('CRM_API_KEY       : ' + (CRM_API_KEY       ? 'SET' : 'MISSING - set in Railway env vars'));
+  console.log('CRM_CALENDAR_ID   : ' + (CRM_CALENDAR_ID   ? 'SET' : 'MISSING - set in Railway env vars'));
+  console.log('CRM_LOCATION_ID   : ' + CRM_LOCATION_ID);
+  console.log('RAILWAY_PUBLIC_URL: ' + (RAILWAY_PUBLIC_URL || '(not set - optional)'));
+  console.log('=====================================\n');
+});
