@@ -157,6 +157,7 @@ IMPORTANT RULES:
 → Never call book_appointment without first having: firstName, lastName, email, and startTime
 → Never fabricate a time — always check_availability first
 → If a booking fails, direct them to the page button as a backup — do not give up
+→ When suggesting times, only offer slots between 9 AM and 7 PM in the caller's timezone — but if the caller explicitly asks for an earlier or later time, check it and book it if available
 
 WHAT YOU NEVER DO:
 • Process payments or collect card information
@@ -655,7 +656,24 @@ app.post('/retell-tools/check-availability', async (req, res) => {
     }
 
     const dayData  = data[date];
-const daySlots = (dayData && Array.isArray(dayData.slots)) ? dayData.slots : [];
+const allSlots = (dayData && Array.isArray(dayData.slots)) ? dayData.slots : [];
+
+// Filter to 9 AM – 7 PM in caller's timezone for proactive suggestions
+const daySlots = allSlots.filter(slotTime => {
+  const timeStr = new Date(slotTime).toLocaleTimeString('en-GB', {
+    hour     : '2-digit',
+    minute   : '2-digit',
+    hour12   : false,
+    timeZone : timezone,
+  }); // → "HH:MM"
+  const hour = parseInt(timeStr.split(':')[0], 10);
+  return hour >= 9 && hour < 19;
+});
+
+if (daySlots.length === 0 && allSlots.length > 0) {
+  const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  return res.json({ result: `I don't have any openings during regular hours on ${dateStr}. Would you like me to check another day, or would an early morning or evening slot work for you?` });
+}
 
 if (daySlots.length === 0) {
       const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
