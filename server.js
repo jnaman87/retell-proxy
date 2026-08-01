@@ -82,9 +82,9 @@ function parseGHLSlots(slotsData, timezone, maxSlots = 20) {
   for (const [dateStr, dateObj] of Object.entries(dateMap)) {
     for (const slot of (dateObj?.slots || [])) {
       let startEpoch;
-      if (typeof slot === 'number')                        startEpoch = slot;
+      if (typeof slot === 'number')                             startEpoch = slot;
       else if (typeof slot === 'string' && slot.includes('T')) startEpoch = new Date(slot).getTime();
-      else                                                 startEpoch = new Date(`${dateStr}T${slot}`).getTime();
+      else                                                      startEpoch = new Date(`${dateStr}T${slot}`).getTime();
       if (!isNaN(startEpoch)) result.push({ startTime: startEpoch, endTime: startEpoch + 30 * 60 * 1000 });
       if (result.length >= maxSlots) return result;
     }
@@ -227,7 +227,6 @@ function buildTools() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-agent
-// Called by CRM workflow when a new lead is tagged
 // Body: { businessName, city, niche, tagline, coreServices, contactId }
 // Returns: { agentId }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -239,7 +238,7 @@ app.post('/create-agent', async (req, res) => {
   }
 
   try {
-        const response = await fetch(`${RETELL_BASE}/v2/create-agent`, {
+    const response = await fetch(`${RETELL_BASE}/v2/create-agent`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -258,7 +257,6 @@ app.post('/create-agent', async (req, res) => {
       }),
     });
 
-    // ← CHANGED: read as text first so we can log it if it’s not JSON
     const rawText = await response.text();
     console.log('Retell status:', response.status);
     console.log('Retell raw response:', rawText.slice(0, 500));
@@ -273,10 +271,6 @@ app.post('/create-agent', async (req, res) => {
     if (!response.ok) return res.status(response.status).json({ error: data });
     return res.json({ agentId: data.agent_id });
 
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json({ error: data });
-    return res.json({ agentId: data.agent_id });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
@@ -285,7 +279,6 @@ app.post('/create-agent', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-web-call
-// Called by the demo page when the lead clicks "Start Call"
 // Body: { agentId }
 // Returns: { access_token }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -312,7 +305,6 @@ app.post('/create-web-call', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /check-availability
-// Called by Retell tool mid-call
 // Body: { timezone_or_city }
 // Returns: { slots: [{ id, label, startTime, endTime }], timezone }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -357,7 +349,6 @@ app.post('/check-availability', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /check-specific-time
-// Called by Retell tool when prospect requests a custom time
 // Body: { date_str, time_str, timezone }
 // Returns: { available, slot? } or { available: false, alternatives }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -420,7 +411,6 @@ app.post('/check-specific-time', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /book-appointment
-// Called by Retell tool after prospect confirms a slot
 // Body: { prospect_name, prospect_email, business_name, slot_label,
 //         start_time, end_time, timezone, crm_contact_id }
 // Returns: { success, appointmentId, contactId }
@@ -481,7 +471,6 @@ app.post('/book-appointment', async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    // Always return 200 — never crash the agent mid-call
     return res.json({ success: true, message: 'Booking received. Confirmation coming shortly.' });
   }
 });
