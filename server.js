@@ -60,7 +60,7 @@ app.get('/', (_req, res) => {
       CRM_API_KEY        : CRM_API_KEY        ? '✅ set' : '❌ MISSING',
       CRM_CALENDAR_ID    : CRM_CALENDAR_ID    ? '✅ set' : '❌ MISSING',
       CRM_LOCATION_ID    : CRM_LOCATION_ID,
-      RAILWAY_PUBLIC_URL : RAILWAY_PUBLIC_URL || '(not set — optional)',
+      RAILWAY_PUBLIC_URL : RAILWAY_PUBLIC_URL ? 'SET' : 'MISSING - required for booking tools',
     },
   });
 });
@@ -157,7 +157,6 @@ IMPORTANT RULES:
 → Never call book_appointment without first having: firstName, lastName, email, and startTime
 → Never fabricate a time — always check_availability first
 → If a booking fails, direct them to the page button as a backup — do not give up
-`;
 
 WHAT YOU NEVER DO:
 • Process payments or collect card information
@@ -181,7 +180,6 @@ TONE GUARDRAILS
 ❌ Never condescending or scripted-sounding
 ❌ Never flustered or over-apologetic`;
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-agent
 //
@@ -215,7 +213,7 @@ app.post('/create-agent', async (req, res) => {
   // ── STEP 1: Create Retell LLM ─────────────────────────────────────────────
   console.log('[create-agent] Step 1: Creating Retell LLM…');
 
-  let llmId, llmWsUrl;
+  let llmId;
 
   try {
     const llmBody = {
@@ -285,8 +283,7 @@ app.post('/create-agent', async (req, res) => {
     }
 
     llmId    = llmData.llm_id;
-    llmWsUrl = llmData.llm_websocket_url;
-    console.log(`[create-agent] ✅ LLM created — id: ${llmId}, wsUrl: ${llmWsUrl}`);
+    console.log(`[create-agent] ✅ LLM created — id: ${llmId}`);
 
   } catch (e) {
     console.error('[create-agent] LLM exception:', e.message);
