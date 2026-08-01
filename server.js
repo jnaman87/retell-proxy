@@ -356,10 +356,11 @@ app.get('/check-availability', async (req, res) => {
   }
 
   try {
-    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
-      `?startDate=${encodeURIComponent(startDate)}` +
-      `&endDate=${encodeURIComponent(endDate)}` +
-      `&timezone=${encodeURIComponent(timezone)}`;
+    const startTs = new Date(startDate).getTime();
+const endTs   = new Date(endDate).getTime();
+
+const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
+  `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
 
     const crmRes = await fetch(url, {
       headers : {
@@ -417,10 +418,11 @@ app.get('/check-specific-time', async (req, res) => {
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const endDate = nextDay.toISOString().split('T')[0];
 
-    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
-      `?startDate=${encodeURIComponent(date)}` +
-      `&endDate=${encodeURIComponent(endDate)}` +
-      `&timezone=${encodeURIComponent(timezone)}`;
+    const startTs = new Date(date).getTime();
+const endTs   = new Date(endDate).getTime();
+
+const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
+  `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
 
     const crmRes = await fetch(url, {
       headers : {
