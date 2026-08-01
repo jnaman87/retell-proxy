@@ -208,7 +208,6 @@ app.post('/create-agent', async (req, res) => {
         voice_id:           'eleven_labs-Rachel',
         language:           'en-US',
         enable_backchannel: true,
-        ambient_sound:      'office',
         ...(contactId && { metadata: { crm_contact_id: contactId } }),
       }),
     });
