@@ -233,19 +233,22 @@ app.post('/create-agent', async (req, res) => {
 
   try {
     const agentBody = {
-      llm_websocket_url         : llmWsUrl,
-      voice_id                  : voiceId,
-      agent_name                : `${bizName || 'Demo'} — Emma (AI Receptionist)`,
-      language                  : 'en-US',
-      enable_backchannel        : true,
-      normalize_for_speech      : true,
-      end_call_after_silence_ms : 30000,   // 30 s silence → hang up
-      max_call_duration_ms      : 1800000, // 30 min hard cap
-      boosted_keywords          : [
-        'emergency', 'urgent', 'dispatch', 'available', 'help',
-        ...(niche ? [niche] : []),
-      ],
-    };
+  response_engine : {
+    type   : 'retell-llm',
+    llm_id : llmId,
+  },
+  voice_id                  : voiceId,
+  agent_name                : `${bizName || 'Demo'} — Emma (AI Receptionist)`,
+  language                  : 'en-US',
+  enable_backchannel        : true,
+  normalize_for_speech      : true,
+  end_call_after_silence_ms : 30000,
+  max_call_duration_ms      : 1800000,
+  boosted_keywords          : [
+    'emergency', 'urgent', 'dispatch', 'available', 'help',
+    ...(niche ? [niche] : []),
+  ],
+};
 
     console.log('[create-agent] Agent payload:', JSON.stringify(agentBody, null, 2));
 
