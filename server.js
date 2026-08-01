@@ -29,6 +29,8 @@ const RAILWAY_PUBLIC_URL = process.env.RAILWAY_PUBLIC_URL;
 
 const RETELL  = 'https://api.retellai.com';
 const CRM_API = 'https://services.leadconnectorhq.com';
+// ─── Per-agent call counter — 5 calls max per demo ───────────────────────────
+const agentCallCounts = {};
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors({ origin: '*' }));
@@ -167,8 +169,9 @@ BOOKING A DISCOVERY CALL:
 When a prospect wants to schedule a discovery call, follow these steps IN ORDER — do not skip ahead.
 
 STEP 1 — COLLECT THEIR DETAILS FIRST (before touching the calendar):
-   Ask for: first name → last name → email address → phone (optional, skip if they hesitate)
-   Do this conversationally, one question at a time.
+   Ask for: first name → last name → email address
+   Phone is NOT required — do not ask for it. Only note it if they volunteer it.
+   One question at a time, conversationally.
 
 STEP 2 — ASK THEIR PREFERENCE:
    "Do you have a day in mind, or would you like me to check what's available?"
@@ -192,6 +195,21 @@ IMPORTANT RULES:
 → ALWAYS call check_availability before book_appointment — even if the caller names a specific time. Confirm availability first, then confirm the time with the caller, then book.
 → If a booking fails, direct them to the page button as a backup — do not give up
 → When suggesting times, only offer slots between 9 AM and 7 PM in the caller's timezone — but if the caller explicitly asks for an earlier or later time, check it and book it if available
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONFIRMING CONTACT DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Before booking, always confirm what you heard:
+
+NAME → "So that's [FIRST] [LAST] — did I get that right?"
+
+EMAIL → Spell it back character by character:
+   "And your email — let me just read that back to make sure I have it exactly:
+   [letter by letter] at [domain] dot [extension] — is that correct?"
+
+→ Do NOT call book_appointment until they have confirmed both name and email are correct
+→ If they correct anything — repeat the corrected version and ask again before proceeding
+→ A wrong email means they miss the confirmation — always double-check
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 POST-DEMO CLOSE
@@ -379,7 +397,7 @@ app.post('/create-agent', async (req, res) => {
   enable_backchannel        : true,
   normalize_for_speech      : true,
   end_call_after_silence_ms : 30000,
-  max_call_duration_ms      : 1800000,
+  max_call_duration_ms      : 600000,
   boosted_keywords          : [
     'emergency', 'urgent', 'dispatch', 'available', 'help',
     ...(niche ? [niche] : []),
@@ -438,6 +456,12 @@ app.post('/create-web-call', async (req, res) => {
     return res.status(400).json({ error: 'agentId is required' });
   }
 
+  const count = agentCallCounts[agentId] || 0;
+  if (count >= 5) {
+    console.log(`[create-web-call] Limit reached for agent ${agentId} — ${count}/5 calls used`);
+    return res.status(429).json({ limitReached: true, error: 'This demo has reached its 5-call limit.' });
+  }
+
   try {
     const body = { agent_id: agentId, metadata };
     console.log('[create-web-call] Payload:', JSON.stringify(body, null, 2));
@@ -458,6 +482,8 @@ app.post('/create-web-call', async (req, res) => {
       return res.status(retellRes.status).json({ error: 'Web call creation failed', details: data });
     }
 
+    agentCallCounts[agentId] = count + 1;
+    console.log(`[create-web-call] Agent ${agentId} — ${agentCallCounts[agentId]}/5 calls used`);
     console.log(`[create-web-call] ✅ Call created — id: ${data.call_id}`);
     return res.json({
       success     : true,
