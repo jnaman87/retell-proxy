@@ -238,7 +238,7 @@ app.post('/create-agent', async (req, res) => {
   }
 
   try {
-    const response = await fetch(`${RETELL_BASE}/v2/create-agent`, {
+    const response = await fetch(`${RETELL_BASE}/create-agent`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
