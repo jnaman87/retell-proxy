@@ -198,7 +198,7 @@ app.post('/create-agent', async (req, res) => {
       model          : 'gpt-4o',
       general_prompt : systemPrompt,
       begin_message  : beginMessage,
-      general_tools  : [{ type: 'end_call' }],
+      general_tools  : [{ type: 'end_call', name: 'end_call' }],
     };
 
     console.log('[create-agent] LLM payload:', JSON.stringify(llmBody, null, 2));
