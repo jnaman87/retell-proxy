@@ -196,7 +196,7 @@ app.post('/create-agent', async (req, res) => {
     const llmId = llmData.llm_id;
 
     // Step 2 — Create the agent referencing the LLM
-    const agentRes = await fetch(`${RETELL_BASE}/create-agent`, {
+    const agentRes = await fetch(`${RETELL_BASE}/v2/create-agent`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
