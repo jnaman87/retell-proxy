@@ -103,7 +103,7 @@ function buildSystemPrompt({ businessName, city, niche, tagline, coreServices })
   });
 
   return `
-TODAY'S DATE: ${todayLabel}
+TODAY'S DATE: ${todayLabel} (use this to resolve day names like "Thursday" into actual calendar dates)
 
 YOU ARE: An AI voice receptionist demo built specifically for ${businessName}, a ${niche} business in ${city}.
 
@@ -124,19 +124,32 @@ CALL FLOW:
 3. Reference their specific services and city to build credibility.
 4. When they are ready, invite them to book a discovery call to set this up for real.
 
-BOOKING FLOW:
-1. When the prospect is ready to book, say:
-   "To grab a time with our team, just tap the booking button right below this call widget.
-    It shows live availability so you can pick whatever works best for you."
-2. Wait briefly in case they have questions.
-3. Then say: "You'll get a confirmation email once you've selected a time.
-    It was great speaking with you — have a wonderful day!"
-4. Call end_call immediately. Do NOT ask "Is there anything else I can help you with?"
+BOOKING FLOW (follow this exact sequence every time):
+
+STEP 1: Ask "What city or timezone are you calling from?"
+
+STEP 2: Call check_availability with their timezone/city.
+         It returns slots already filtered to 9am–7pm in their local time.
+         Offer them up to 3 of those options.
+
+STEP 3A — If they choose one of your offered slots:
+  → Collect their name and email address.
+  → Call book_appointment using the exact startTime and endTime from the slot.
+  → Say: "You'll receive an email confirmation shortly. Have a wonderful day!"
+  → Call end_call immediately. Do NOT ask "Is there anything else I can help you with?"
+
+STEP 3B — If they request a different time not in your offered list:
+  → Convert their request to a date (YYYY-MM-DD) and time (HH:MM, 24-hour).
+     Example: "Thursday at 2pm" → date_str="2026-08-06", time_str="14:00"
+  → Call check_specific_time with that date, time, and their timezone.
+  → If available = true: collect name + email → call book_appointment → confirm → call end_call.
+  → If available = false: offer the 2 alternatives returned → once they pick, collect name + email → book → confirm → call end_call.
+
+NEVER invent or guess a time slot. Only book times confirmed as available by the tools.
+NEVER ask "Is there anything else I can help you with?" — end the call after the booking confirmation.
 
 PRICING (only if asked — do not bring up unprompted):
-"This service is $497 per month. That does not include carrier charges — those are the actual
-cost of phone minutes and SMS billed at usage. Everything else, including setup, the AI,
-ongoing updates, and support, is covered. Want to book a call to go over what's included?"
+"This service is $497 per month. That does not include carrier charges — those are the actual cost of phone minutes and SMS billed at usage. Everything else, including setup, the AI, ongoing updates, and support, is covered. Want to book a quick call to go over what's included?"
 
 TONE: Calm, professional, empathetic. Short sentences. Never robotic.
 Never say you are an AI unless directly asked.
@@ -147,13 +160,67 @@ function buildBeginMessage(businessName) {
   return `Thank you for calling ${businessName}! I'm Emma, your AI receptionist. How can I help you today?`;
 }
 
-// ── Tools ──────────────────────────────────────────────────────────────────────────
+// ── Retell tool definitions ───────────────────────────────────────────────────
 function buildTools() {
   return [
     {
+      type:        'webhook',
+      name:        'check_availability',
+      description: 'Check available discovery call slots in the prospect\'s timezone. Returns up to 6 slots filtered to between 9am and 7pm local time. Call this first before offering any times.',
+      url:         `${RAILWAY_URL}/check-availability`,
+      speak_during_execution:   true,
+      execution_message_during: 'Let me check what times are available for you right now.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          timezone_or_city: { type: 'string', description: 'The caller\'s city (e.g. "Houston") or timezone label (e.g. "Eastern", "CST").' },
+        },
+        required: ['timezone_or_city'],
+      },
+    },
+    {
+      type:        'webhook',
+      name:        'check_specific_time',
+      description: 'Check if a specific date and time requested by the prospect is available. If not, returns 2 closest available alternatives within business hours. Use this when the prospect requests a time different from the options you offered.',
+      url:         `${RAILWAY_URL}/check-specific-time`,
+      speak_during_execution:   true,
+      execution_message_during: 'Let me check if that time works.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          date_str: { type: 'string', description: 'Requested date in YYYY-MM-DD format. Calculate from TODAY\'S DATE in your context.' },
+          time_str: { type: 'string', description: 'Requested time in HH:MM 24-hour format. E.g. "2pm" = "14:00".' },
+          timezone: { type: 'string', description: 'IANA timezone string from the earlier check_availability response.' },
+        },
+        required: ['date_str', 'time_str', 'timezone'],
+      },
+    },
+    {
+      type:        'webhook',
+      name:        'book_appointment',
+      description: 'Book the discovery call at the exact slot the prospect has confirmed. Use the startTime and endTime values returned by check_availability or check_specific_time.',
+      url:         `${RAILWAY_URL}/book-appointment`,
+      speak_during_execution:   true,
+      execution_message_during: 'Booking that for you now — just a moment.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          prospect_name:   { type: 'string', description: 'Full name of the prospect' },
+          prospect_email:  { type: 'string', description: 'Email address of the prospect' },
+          business_name:   { type: 'string', description: 'Name of the business they represent' },
+          slot_label:      { type: 'string', description: 'Human-readable label of the chosen slot' },
+          start_time:      { type: 'number', description: 'Epoch milliseconds for slot start' },
+          end_time:        { type: 'number', description: 'Epoch milliseconds for slot end' },
+          timezone:        { type: 'string', description: 'IANA timezone of the prospect' },
+          crm_contact_id:  { type: 'string', description: 'CRM contact ID of the originating lead if known' },
+        },
+        required: ['prospect_name', 'prospect_email', 'business_name', 'start_time', 'end_time'],
+      },
+    },
+    {
       type:        'end_call',
       name:        'end_call',
-      description: 'End the call after saying goodbye to the prospect.',
+      description: 'End the call. Call ONLY after confirming the booking and saying: "You will receive an email confirmation shortly. Have a wonderful day!"',
     },
   ];
 }
@@ -171,58 +238,38 @@ app.post('/create-agent', async (req, res) => {
   }
 
   try {
-    // Step 1 — Create the LLM (prompt + tools)
-    const llmRes = await fetch(`${RETELL_BASE}/create-retell-llm`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model:          'gpt-4o-mini',
-        general_prompt:  buildSystemPrompt({ businessName, city, niche, tagline, coreServices }),
-        begin_message:   buildBeginMessage(businessName),
-        general_tools:   buildTools(),
-      }),
-    });
-
-    const llmRaw = await llmRes.text();
-    console.log('Retell LLM status:', llmRes.status);
-    console.log('Retell LLM response:', llmRaw.slice(0, 500));
-
-    let llmData;
-    try { llmData = JSON.parse(llmRaw); }
-    catch (e) { return res.status(500).json({ error: 'LLM creation returned non-JSON. Check logs.' }); }
-
-    if (!llmRes.ok) return res.status(llmRes.status).json({ error: llmData });
-
-    const llmId = llmData.llm_id;
-
-    // Step 2 — Create the agent referencing the LLM
-    const agentRes = await fetch(`${RETELL_BASE}/v2/create-agent`, {
+    const response = await fetch(`${RETELL_BASE}/v2/create-agent`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${RETELL_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         agent_name: `${businessName} — ${city} AI Receptionist`,
         response_engine: {
-          type:   'retell-llm',
-          llm_id:  llmId,
+          type:           'retell-llm',
+          general_prompt:  buildSystemPrompt({ businessName, city, niche, tagline, coreServices }),
+          begin_message:   buildBeginMessage(businessName),
+          general_tools:   buildTools(),
         },
         voice_id:           'eleven_labs-Rachel',
         language:           'en-US',
-        ambient_sounds: 'coffee-shop',
         enable_backchannel: true,
+        ambient_sound:      'office',
         ...(contactId && { metadata: { crm_contact_id: contactId } }),
       }),
     });
 
-    const agentRaw = await agentRes.text();
-    console.log('Retell Agent status:', agentRes.status);
-    console.log('Retell Agent response:', agentRaw.slice(0, 500));
+    const rawText = await response.text();
+    console.log('Retell status:', response.status);
+    console.log('Retell raw response:', rawText.slice(0, 500));
 
-    let agentData;
-    try { agentData = JSON.parse(agentRaw); }
-    catch (e) { return res.status(500).json({ error: 'Agent creation returned non-JSON. Check logs.' }); }
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch (parseErr) {
+      return res.status(500).json({ error: 'Retell returned non-JSON. Check Railway logs for the raw response.' });
+    }
 
-    if (!agentRes.ok) return res.status(agentRes.status).json({ error: agentData });
-    return res.json({ agentId: agentData.agent_id });
+    if (!response.ok) return res.status(response.status).json({ error: data });
+    return res.json({ agentId: data.agent_id });
 
   } catch (err) {
     console.error(err);
