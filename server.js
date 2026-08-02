@@ -10,7 +10,7 @@
  *   POST /create-web-call      → create Retell web call token
  *   GET  /check-availability   → fetch free calendar slots
  *   GET  /check-specific-time  → check if a specific slot is free
- *   POST /book-appointment     → book a GHL calendar appointment
+ *   POST /book-appointment     → book a Hexona Systems calendar appointment
  */
 
 const express  = require('express');
@@ -21,14 +21,15 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── Environment ──────────────────────────────────────────────────────────────
-const RETELL_API_KEY    = process.env.RETELL_API_KEY;
-const CRM_API_KEY       = process.env.CRM_API_KEY;
-const CRM_CALENDAR_ID   = process.env.CRM_CALENDAR_ID;
-const CRM_LOCATION_ID   = process.env.CRM_LOCATION_ID   || 'dImqkGzlWhmVksSXL1WY';
+const RETELL_API_KEY     = process.env.RETELL_API_KEY;
+const CRM_API_KEY        = process.env.CRM_API_KEY;
+const CRM_CALENDAR_ID    = process.env.CRM_CALENDAR_ID;
+const CRM_LOCATION_ID    = process.env.CRM_LOCATION_ID || 'dImqkGzlWhmVksSXL1WY';
 const RAILWAY_PUBLIC_URL = process.env.RAILWAY_PUBLIC_URL;
 
 const RETELL  = 'https://api.retellai.com';
 const CRM_API = 'https://services.leadconnectorhq.com';
+
 // ─── Per-agent call counter — 5 calls max per demo ───────────────────────────
 const agentCallCounts = {};
 
@@ -36,7 +37,312 @@ const agentCallCounts = {};
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Request logger
+// ============================================================
+// NICHE TEMPLATES
+// One entry per niche. agentName is the voice persona name.
+// toneBlock is injected verbatim into the system prompt.
+// openingLine is the exact first sentence the agent speaks.
+// ============================================================
+
+const NICHE_TEMPLATES = {
+  restoration: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are calm, empathetic, and action-oriented. Many callers are panicking due to water, fire, or mold damage.
+Your first job is to make them feel that help is already on the way. Speak with quiet confidence.
+Never sound rushed or robotic.
+
+INDUSTRY CONTEXT
+Callers typically have water or flood damage (burst pipe, storm, appliance leak), fire or smoke damage,
+or a mold problem. They want to know: can someone come today, is it covered by insurance, what happens first.
+
+KEY POINTS TO COMMUNICATE
+- 24/7 emergency response available
+- Free damage assessment
+- Works directly with insurance companies
+- Licensed and certified technicians on call`,
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you dealing with an emergency right now, or how can I help you today?'
+  },
+
+  bailbond: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are confident, no-nonsense, and fast-moving. Callers are stressed and often emotional.
+They want someone out of jail as quickly as possible. Be direct, gather the facts, and keep moving.
+
+INDUSTRY CONTEXT
+Callers need to bail out a family member or friend, or want to know how the process works.
+Common questions: how much does it cost, how long does it take, what do I need to bring.
+
+KEY POINTS TO COMMUNICATE
+- 24/7 service, fast response
+- Typically 10% of the bail amount is required
+- Completely confidential and professional
+- Works with local jails and courts`,
+    openingLine: 'Thank you for calling {businessName}, this is Emma. How can I help you right now?'
+  },
+
+  towing: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are efficient, reassuring, and quick. Callers are stranded and just want help as fast as possible.
+Get the information you need, confirm that help is coming, and let them go.
+
+INDUSTRY CONTEXT
+Callers need emergency towing after a breakdown or accident, roadside assistance (flat tire, dead battery, lockout),
+or vehicle transport. They want to know: how fast can you get here, and what does it cost.
+
+KEY POINTS TO COMMUNICATE
+- Fast response times, 24/7 availability
+- Flat rates, no hidden fees
+- GPS dispatching to their exact location
+- All vehicle types handled`,
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you in need of a tow right now?'
+  },
+
+  locksmith: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are calm, confident, and fast-moving. Being locked out is stressful.
+Make the caller feel the problem is already being solved from the moment they hear your voice.
+
+INDUSTRY CONTEXT
+Callers are locked out of their car, home, or office. Some need a lock change or rekeying.
+They want to know: how fast can you come, and what is the price.
+
+KEY POINTS TO COMMUNICATE
+- Fast arrival, 24/7 service
+- Upfront pricing, no hidden fees
+- Licensed and insured locksmiths
+- All lock types and vehicle makes handled`,
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you locked out right now, or how can I help?'
+  },
+
+  vet: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are calm, caring, and professional. The caller may be panicking about their pet.
+Keep your voice steady, reassure them that they have reached the right place, and guide them clearly.
+
+INDUSTRY CONTEXT
+Callers have a pet showing signs of injury or illness, suspected poisoning, or post-surgery concerns.
+They want to know: can we come in now, what should we do while we drive there.
+
+KEY POINTS TO COMMUNICATE
+- Emergency care available now, veterinarians on staff around the clock
+- What to do before arriving: keep the animal calm, do not feed them, drive carefully
+- All species and breeds seen`,
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Is this an emergency with your pet, or how can I help you today?'
+  },
+
+  funeral: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are compassionate, unhurried, and gentle. The caller has likely just lost someone or is planning ahead.
+Speak softly and slowly. Never rush. Lead with empathy before logistics.
+
+INDUSTRY CONTEXT
+Callers are families with an immediate need following a death, individuals planning arrangements in advance,
+or people asking about cremation versus burial options.
+They want to know: can someone help us now, what are our options, what does it cost.
+
+KEY POINTS TO COMMUNICATE
+- Available 24/7, including for immediate needs
+- Full range of services: burial, cremation, memorial, pre-planning
+- Compassionate and personalised service
+- Arrangements can be discussed in a private consultation`,
+    openingLine: 'Thank you for reaching {businessName}, this is Emma. How can I be of help to you today?'
+  },
+
+  septic: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are direct, practical, and calm. Sewage issues are urgent. Get the facts quickly and move to dispatch.
+Do not over-explain. The caller wants to know help is coming.
+
+INDUSTRY CONTEXT
+Callers have sewage backing up into their home or business, a full or overflowing tank, or drain field problems.
+They want to know: can someone come today, how fast, and what does it cost.
+
+KEY POINTS TO COMMUNICATE
+- 24/7 emergency response, immediate dispatch available
+- Emergency pumping, drain cleaning, and system repair
+- Licensed technicians, upfront pricing`,
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you dealing with a septic emergency right now?'
+  },
+
+  nemt: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are patient, clear, and well-organised. Many callers are elderly or are caregivers and may need extra time.
+Speak at a measured pace, confirm details carefully, and never rush through booking.
+
+INDUSTRY CONTEXT
+Callers need rides to and from dialysis, chemotherapy, or clinic appointments, hospital discharge transportation,
+or wheelchair and stretcher-accessible vehicle bookings.
+They want to know: are you available on my date, do you have the right vehicle, do you accept my insurance.
+
+KEY POINTS TO COMMUNICATE
+- Reliable, on-time medical transport
+- Wheelchair and mobility-accessible vehicles available
+- Professional, trained drivers
+- Advance booking available, scheduling line open 24/7`,
+    openingLine: 'Thank you for calling {businessName}, this is Emma. How can I help you schedule your transportation today?'
+  },
+
+  security: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are professional, measured, and consultative. Business owners calling about security want to feel
+they are dealing with a serious and capable company. Be confident without being aggressive.
+Listen to their needs before proposing anything.
+
+INDUSTRY CONTEXT
+Callers are business owners or property managers needing ongoing coverage, event organisers needing
+temporary security, or companies seeking immediate coverage after an incident.
+They want to know: can you cover my site, how quickly, and what does it cost.
+
+KEY POINTS TO COMMUNICATE
+- Licensed, vetted, uniformed security officers
+- 24/7 coverage available for commercial, retail, events, and construction sites
+- Site assessments available before signing any contract
+- Flexible short-term and long-term contracts`,
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you looking for security coverage, or how can I help you today?'
+  },
+
+  roadside: {
+    agentName: 'Emma',
+    toneBlock: `
+TONE AND PERSONA
+You are fast, calm, and action-oriented. The caller is stranded and possibly in an unsafe location.
+Get the key details quickly, confirm help is on the way, and let them go.
+
+INDUSTRY CONTEXT
+Callers need a jump start for a dead battery, a flat tire change, emergency fuel delivery,
+vehicle lockout assistance, or light towing.
+They want to know: how fast can you get here, and what does it cost.
+
+KEY POINTS TO COMMUNICATE
+- Fast dispatch, 24/7 availability
+- Flat and transparent pricing
+- All vehicle types covered
+- GPS-based dispatch for fast arrival`,
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you broken down right now? Let me get help on the way.'
+  }
+};
+
+// ============================================================
+// NICHE NORMALIZER
+// Maps any incoming niche string to a template key.
+// ============================================================
+
+function normalizeNiche(niche) {
+  const n = (niche || '').toLowerCase();
+  if (n.includes('restoration') || n.includes('flood') || n.includes('water damage') || n.includes('fire damage') || n.includes('mold')) return 'restoration';
+  if (n.includes('bail'))                                                                      return 'bailbond';
+  if (n.includes('tow'))                                                                       return 'towing';
+  if (n.includes('locksmith') || n.includes('lockout') || n.includes('lock'))                 return 'locksmith';
+  if (n.includes('vet') || n.includes('animal') || n.includes('pet'))                         return 'vet';
+  if (n.includes('funeral') || n.includes('mortuary') || n.includes('cremation'))             return 'funeral';
+  if (n.includes('septic') || n.includes('sewage') || n.includes('drain'))                    return 'septic';
+  if (n.includes('nemt') || n.includes('medical transport') || n.includes('non-emergency'))   return 'nemt';
+  if (n.includes('security') || n.includes('guard'))                                          return 'security';
+  if (n.includes('roadside') || n.includes('breakdown') || n.includes('battery'))             return 'roadside';
+  return 'restoration'; // fallback
+}
+
+// ============================================================
+// SYSTEM PROMPT BUILDER
+// Combines niche template with business-specific details.
+// ============================================================
+
+function buildSystemPrompt({ niche, businessName, city, coreServices, tagline }) {
+  const key      = normalizeNiche(niche);
+  const template = NICHE_TEMPLATES[key] || NICHE_TEMPLATES.restoration;
+  const today    = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+
+  const opening = template.openingLine.replace('{businessName}', businessName);
+
+  return `
+# AI VOICE RECEPTIONIST
+Business: ${businessName}
+City: ${city}
+Today's date: ${today}
+
+## IDENTITY
+Your name is ${template.agentName}. You are the AI voice receptionist for ${businessName} in ${city}.
+${tagline      ? `Their tagline: "${tagline}"`           : ''}
+${coreServices ? `Their core services: ${coreServices}` : ''}
+
+## OPENING LINE
+When the call connects, say exactly:
+"${opening}"
+
+${template.toneBlock}
+
+## WHAT YOU CAN DO FOR CALLERS
+1. Answer questions about ${businessName}'s services in ${city}
+2. Check appointment or consultation availability
+3. Book a discovery call
+4. Provide general guidance on what to expect
+
+## BOOKING FLOW
+Follow these steps in order every time a caller wants to book.
+
+STEP 1 - CHECK AVAILABILITY
+Use the check_availability tool. Never guess or invent times.
+
+STEP 2 - OFFER SLOTS
+If only one slot is available, say: "I have [day] at [time] available. Does that work for you?"
+If multiple slots are available, offer up to three: "I have a few options. [time 1], [time 2], or [time 3]. Which works best for you?"
+
+STEP 3 - GET THEIR NAME
+Ask: "What name should I put this under?"
+Get their first name and last name separately if needed.
+Spell it back letter by letter: "Let me confirm, that is [J-O-H-N S-M-I-T-H]. Is that right?"
+
+STEP 4 - GET THEIR EMAIL
+Ask: "And what is the best email address for your confirmation?"
+Spell it back: "So that is [j-o-h-n at g-m-a-i-l dot com]. Is that correct?"
+
+STEP 5 - BOOK AND CLOSE
+Use the book_appointment tool with their firstName, lastName, email, and the selected startTime.
+Once confirmed, say:
+"Perfect. You are all set for [day] at [time]. You will receive an email confirmation shortly."
+End the call naturally. Do NOT say "Is there anything else I can help you with?"
+
+## SPEAKING STYLE
+- Speak naturally, like a warm and capable human receptionist
+- Use natural fillers occasionally: "Sure", "Of course", "Absolutely", "Got it"
+- Keep responses concise. This is a phone call
+- Never read out long lists. Summarise and offer to elaborate
+- If you do not know something specific about the business, say:
+  "That is a great question. I would want to make sure you get the right answer.
+   The best thing is to bring that up during your consultation."
+
+## PRICING (only if asked about the AI receptionist service)
+The AI receptionist service starts at $497 per month. Direct the caller to book a discovery call.
+
+## GUARDRAILS
+- Never mention or compare competitor companies
+- Never make up information about ${businessName}
+- Never promise specific response times or pricing unless you know them for certain
+- Always stay in character as ${template.agentName}, the receptionist for ${businessName}
+`.trim();
+}
+
+// ─── Request logger ───────────────────────────────────────────────────────────
 app.use((req, _res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
@@ -62,379 +368,154 @@ app.get('/', (_req, res) => {
       CRM_API_KEY        : CRM_API_KEY        ? '✅ set' : '❌ MISSING',
       CRM_CALENDAR_ID    : CRM_CALENDAR_ID    ? '✅ set' : '❌ MISSING',
       CRM_LOCATION_ID    : CRM_LOCATION_ID,
-      RAILWAY_PUBLIC_URL : RAILWAY_PUBLIC_URL ? 'SET' : 'MISSING - required for booking tools',
+      RAILWAY_PUBLIC_URL : RAILWAY_PUBLIC_URL ? 'SET'    : 'MISSING — required for booking tools',
     },
   });
 });
 
-// ─── System prompt builder ────────────────────────────────────────────────────
-function buildSystemPrompt({ bizName, city, focus, tagline, coreServices, niche }) {
-  const today = new Date().toLocaleDateString('en-US', {
-    weekday : 'long',
-    year    : 'numeric',
-    month   : 'long',
-    day     : 'numeric',
-  });
-
-  const bn = bizName      || 'the business';
-  const ct = city         || 'your area';
-  const ni = niche        || 'emergency services';
-  const fo = focus        || ni;
-  const tg = tagline      || 'Always ready when you need us most';
-  const cs = coreServices || '24/7 emergency response, rapid dispatch, on-site support';
-
-  return `You are Emma, an AI voice receptionist demo built for ${bn} — a ${ni} company serving ${ct}.
-
-Today's date is ${today}.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-BUSINESS PROFILE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Business Name : ${bn}
-City / Market : ${ct}
-Niche         : ${ni}
-Specialty     : ${fo}
-Tagline       : "${tg}"
-Core Services : ${cs}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-YOUR ROLE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-You are an AI demo showing ${bn} what an always-on AI receptionist would sound like for their business.
-You handle inbound calls professionally, answer questions about the business, and guide serious
-prospects to book a discovery call. You are NOT a real employee — you are demonstrating the technology.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PERSONALITY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Warm, calm, confident — never robotic, never rushed
-• Industry-fluent — use terminology natural to ${ni}
-• Steady under pressure — emergency callers need a composed voice, not panic
-• Concise — give the caller what they need and move things forward
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SPEAKING STYLE — SOUND HUMAN
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-You speak like a warm, sharp human receptionist — not a bot reading a script.
-
-FILLER WORDS & TRANSITIONS (use naturally, not every sentence):
-• "Sure thing!" / "Absolutely!" / "Of course!"
-• "Let me just check that for you..."
-• "Great, give me one moment..."
-• "Mmm, let me see..."
-• "Oh, perfect!"
-• "Got it — and..."
-• "So just to confirm..."
-
-EMOTIONAL WARMTH:
-• When someone mentions an emergency → lead with empathy before logistics:
-  "Oh gosh, okay — let's get someone out to you right away."
-• When someone books a call → genuine excitement:
-  "Oh fantastic, that's great to hear! Let me get that locked in."
-• When something goes wrong → calm reassurance:
-  "No worries at all, we'll sort this out."
-
-NATURAL RHYTHM:
-• Vary your sentence length — mix short punchy responses with fuller ones
-• Don't front-load every response with the person's name — it sounds robotic
-• It's okay to trail off naturally: "So I'll have that booked for you and..."
-• React to what they say before moving to the next step — don't bulldoze
-
-WHAT TO AVOID:
-• Never say "Certainly!" — it sounds like a chatbot
-• Never repeat the same filler back to back
-• Never speak in bullet points or lists out loud
-• Never say "I have noted that" or "As per your request"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CALL FLOW
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-OPENING (always start with):
-"Thank you for calling ${bn}, this is Emma. How can I help you today?"
-
-DURING THE CALL:
-1. Listen and identify what the caller needs
-2. Emergency / service request → acknowledge urgency, confirm you're capturing details and escalating
-3. General inquiry → answer helpfully using the business profile above
-4. Prospect / business owner asking about the AI service → move to booking flow (see below)
-
-PRICING (only if asked about the AI receptionist service):
-• $497 per month — month-to-month, no long-term contracts
-• Covers full setup, voice customisation, calendar integration, and ongoing support
-• Standard carrier charges apply for any outbound calls (varies by usage volume)
-• Do NOT negotiate or discount pricing on this call
-
-BOOKING A DISCOVERY CALL:
-When a prospect wants to schedule a discovery call, follow these steps IN ORDER — do not skip ahead.
-
-STEP 1 — COLLECT THEIR DETAILS FIRST (before touching the calendar):
-   Ask for: first name → last name → email address
-   Phone is NOT required — do not ask for it. Only note it if they volunteer it.
-   One question at a time, conversationally.
-
-STEP 2 — ASK THEIR PREFERENCE:
-   "Do you have a day in mind, or would you like me to check what's available?"
-   → If they give a day: call check_availability with that date
-   → If they want options: call check_availability for the next business day
-
-STEP 3 — PRESENT THE SLOTS NATURALLY:
-   "I've got openings at 10am, 2pm, and 4pm on Tuesday — which of those works for you?"
-
-STEP 4 — CONFIRM BEFORE BOOKING:
-   Repeat the chosen time back: "Perfect — so that's [TIME] on [DATE]. Let me get that locked in."
-   Then call book_appointment with all collected details.
-
-STEP 5 — AFTER BOOKING CONFIRMS:
-   Read back the confirmation warmly.
-   Remind them a confirmation email is on its way.
-   Then close the call with the sign-off.
-
-IMPORTANT RULES:
-→ Never call book_appointment without first having: firstName, lastName, email, and startTime
-→ ALWAYS call check_availability before book_appointment — even if the caller names a specific time. Confirm availability first, then confirm the time with the caller, then book.
-→ If a booking fails, direct them to the page button as a backup — do not give up
-→ When suggesting times, only offer slots between 9 AM and 7 PM in the caller's timezone — but if the caller explicitly asks for an earlier or later time, check it and book it if available
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONFIRMING CONTACT DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Before booking, always confirm what you heard:
-
-NAME → "So that's [FIRST] [LAST] — did I get that right?"
-
-EMAIL → Spell it back character by character:
-   "And your email — let me just read that back to make sure I have it exactly:
-   [letter by letter] at [domain] dot [extension] — is that correct?"
-
-→ Do NOT call book_appointment until they have confirmed both name and email are correct
-→ If they correct anything — repeat the corrected version and ask again before proceeding
-→ A wrong email means they miss the confirmation — always double-check
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-POST-DEMO CLOSE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Once the demo interaction feels complete — you've handled a practice call, answered
-questions about ${bn}, or the prospect has explored what you can do — create a natural
-transition. Do not wait for them to ask.
-
-TRANSITION (adapt naturally, don't recite word-for-word):
-"So that's a taste of what this would sound like for ${bn} — live, 24/7, handling every
-inbound call just like that. The good news is we can have something exactly like this
-built and live for your business within a couple of days."
-
-Then pause. Let them respond.
-
-IF THEY'RE INTERESTED OR WANT TO KNOW MORE:
-→ Move straight into the booking flow
-→ Frame it warmly: "Let me get you a quick call with our team — they'll walk you through
-   exactly how it works for ${ni} businesses and get everything set up for you."
-→ Then collect their details and book the appointment
-
-IF THEY HAVE QUESTIONS BEFORE BOOKING:
-Answer these confidently:
-• Timeline      → "Usually live within 48 hours once we have your business details."
-• Pricing       → "$497 a month, month-to-month — no lock-in, cancel anytime."
-• What's included → "Full setup, voice customisation, calendar integration, and ongoing support."
-• Sounds natural? → "Yes — this call right now is exactly what your callers would hear."
-• Multiple calls  → "It's always on and handles every call simultaneously, no missed calls."
-• Customisation   → "Completely — it's built around your services, your city, your workflow."
-
-For anything you genuinely cannot answer with confidence:
-→ "That's a great question — and honestly, that's exactly what the discovery call is for.
-   The team will give you a straight answer on that. Want to lock in a time?"
-→ Then transition to booking
-
-NEVER:
-→ Invent answers about integrations, contracts, or custom features
-→ Let the conversation stall — the call is always the natural next step
-→ Push aggressively — be warm, confident, and genuinely helpful
-
-WHAT YOU NEVER DO:
-• Process payments or collect card information
-• Make guarantees about real emergency response times (this is a demo)
-• Fabricate information not included in the business profile above
-• Say "As an AI..." or break the demo immersion unnecessarily
-
-CLOSING:
-When the conversation reaches a natural end —
-→ Thank them warmly
-→ Remind them: "The 'Book a Discovery Call' button is right there on the page whenever you're ready."
-→ Sign off: "Have a wonderful day — and remember, your business never has to miss another call."
-→ End the call gracefully.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TONE GUARDRAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ Professional, warm, confident
-✅ Emergency-ready — steady, reassuring voice under pressure
-✅ Solution-focused — move conversations forward
-❌ Never condescending or scripted-sounding
-❌ Never flustered or over-apologetic`;
-}
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-agent
 //
-// Body (all optional except where noted):
-//   bizName      {string}  — business name
-//   city         {string}  — city / market
-//   niche        {string}  — industry niche (e.g. "Towing Companies")
-//   focus        {string}  — specialty focus within niche
-//   tagline      {string}  — business tagline
-//   coreServices {string}  — comma-separated core services
-//   voiceId      {string}  — Retell voice ID (default: "retell-Cimo")
+// Expected body:
+//   niche:        string  (e.g. "funeral", "roadside", "septic")
+//   businessName: string  (e.g. "Smith Funeral Home")
+//   city:         string  (e.g. "Houston")
+//   coreServices: string  (scraped from website, optional)
+//   tagline:      string  (scraped from website, optional)
 //
-// Returns: { success, agentId, llmId, agentName }
+// Returns: { success: true, agentId, llmId, agentName }
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/create-agent', async (req, res) => {
-  if (!guardEnv('RETELL_API_KEY', res)) return;
-
-  const {
-    bizName      = '',
-    city         = '',
-    focus        = '',
-    tagline      = '',
-    coreServices = '',
-    niche        = '',
-    voiceId      = 'retell-Cimo', // ← swap this from your Retell dashboard after first test
-  } = req.body;
-
-  const systemPrompt = buildSystemPrompt({ bizName, city, focus, tagline, coreServices, niche });
-  const beginMessage = `Thank you for calling ${bizName || 'us'}, this is Emma. How can I help you today?`;
-
-  // ── STEP 1: Create Retell LLM ─────────────────────────────────────────────
-  console.log('[create-agent] Step 1: Creating Retell LLM…');
-
-  let llmId;
-
   try {
-    const llmBody = {
-  model          : 'gpt-4o',
-  general_prompt : systemPrompt,
-  begin_message  : beginMessage,
-  general_tools  : [
-    {
-      type : 'end_call',
-      name : 'end_call',
-    },
-    {
-      type                         : 'custom',
-      name                         : 'check_availability',
-      description                  : 'Check what appointment slots are available on a given date. Call this when the prospect wants to book a discovery call and you need to find available times.',
-      speak_during_execution       : true,
-      execution_message_description: 'Let me check the calendar for you.',
-      url                          : `${RAILWAY_PUBLIC_URL}/retell-tools/check-availability`,
-      parameters : {
-        type       : 'object',
-        properties : {
-          date     : { type: 'string', description: 'Date to check in YYYY-MM-DD format' },
-          timezone : { type: 'string', description: "Caller's timezone as IANA string e.g. America/Chicago" },
-        },
-        required : ['date'],
-      },
-    },
-    {
-      type                         : 'custom',
-      name                         : 'book_appointment',
-      description                  : 'Book a 30-minute discovery call. Only call this after you have confirmed the exact time with the prospect and collected their name and email.',
-      speak_during_execution       : true,
-      execution_message_description: 'Perfect, let me get that locked in for you right now.',
-      url                          : `${RAILWAY_PUBLIC_URL}/retell-tools/book-appointment`,
-      parameters : {
-        type       : 'object',
-        properties : {
-          firstName : { type: 'string', description: "Prospect's first name" },
-          lastName  : { type: 'string', description: "Prospect's last name" },
-          email     : { type: 'string', description: "Prospect's email address" },
-          phone     : { type: 'string', description: "Prospect's phone number (optional)" },
-          startTime : { type: 'string', description: 'Confirmed start time in ISO 8601 format e.g. 2026-08-05T14:00:00-05:00' },
-          timezone  : { type: 'string', description: "Prospect's IANA timezone" },
-        },
-        required : ['firstName', 'lastName', 'email', 'startTime'],
-      },
-    },
-  ],
-};
+    const {
+      niche        = 'restoration',
+      businessName = 'Your Business',
+      city         = 'your area',
+      coreServices = '',
+      tagline      = ''
+    } = req.body;
 
-    console.log('[create-agent] LLM payload:', JSON.stringify(llmBody, null, 2));
+    const systemPrompt     = buildSystemPrompt({ niche, businessName, city, coreServices, tagline });
+    const nicheLabel       = normalizeNiche(niche);
+    const agentDisplayName = `[${nicheLabel}] ${businessName} - ${city}`;
 
-    const llmRes  = await fetch(`${RETELL}/create-retell-llm`, {
+    const RAILWAY_URL = process.env.RAILWAY_PUBLIC_URL;
+    const RETELL_KEY  = process.env.RETELL_API_KEY;
+    const VOICE_ID    = process.env.RETELL_VOICE_ID || 'retell-Cimo';
+
+    // ── STEP 1: Create Retell LLM ──────────────────────────────────────────
+    const llmRes = await fetch('https://api.retellai.com/create-retell-llm', {
       method  : 'POST',
-      headers : {
-        Authorization  : `Bearer ${RETELL_API_KEY}`,
-        'Content-Type' : 'application/json',
-      },
-      body : JSON.stringify(llmBody),
+      headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
+      body    : JSON.stringify({
+        model          : 'gpt-4o',
+        general_prompt : systemPrompt,
+        general_tools  : [
+          {
+            type                         : 'external',
+            name                         : 'check_availability',
+            description                  : 'Check available appointment slots. Call this whenever the caller wants to book or asks about available times.',
+            speak_during_execution       : true,
+            speak_after_execution        : false,
+            execution_message_description: 'Let me check availability for you...',
+            url                          : `${RAILWAY_URL}/retell-tools/check-availability`,
+            parameters: {
+              type      : 'object',
+              properties: {
+                date: {
+                  type       : 'string',
+                  description: 'The calendar date to check, formatted as YYYY-MM-DD. Use the date the caller mentioned, or the next business day if they did not specify.'
+                },
+                timezone: {
+                  type       : 'string',
+                  description: 'IANA timezone of the caller, e.g. America/New_York. Default to America/New_York if unknown.'
+                }
+              },
+              required: ['date']
+            }
+          },
+          {
+            type                         : 'external',
+            name                         : 'book_appointment',
+            description                  : 'Book a confirmed appointment slot. Only call this after the caller has confirmed their first name, last name, email, and chosen time slot.',
+            speak_during_execution       : true,
+            speak_after_execution        : false,
+            execution_message_description: 'Booking that for you now...',
+            url                          : `${RAILWAY_URL}/retell-tools/book-appointment`,
+            parameters: {
+              type      : 'object',
+              properties: {
+                firstName: {
+                  type       : 'string',
+                  description: "Caller's first name, confirmed and spelled back"
+                },
+                lastName: {
+                  type       : 'string',
+                  description: "Caller's last name, confirmed and spelled back"
+                },
+                email: {
+                  type       : 'string',
+                  description: "Caller's email address, confirmed character by character"
+                },
+                startTime: {
+                  type       : 'string',
+                  description: 'ISO 8601 datetime string of the selected slot, e.g. 2026-08-10T14:00:00-05:00'
+                },
+                timezone: {
+                  type       : 'string',
+                  description: 'IANA timezone of the caller, e.g. America/New_York'
+                }
+              },
+              required: ['firstName', 'lastName', 'email', 'startTime']
+            }
+          }
+        ]
+      })
     });
-
-    const llmData = await llmRes.json();
-    console.log(`[create-agent] LLM response (${llmRes.status}):`, JSON.stringify(llmData, null, 2));
 
     if (!llmRes.ok) {
-      return res.status(llmRes.status).json({ error: 'LLM creation failed', details: llmData });
+      const err = await llmRes.text();
+      throw new Error(`LLM creation failed: ${err}`);
     }
+    const llmData = await llmRes.json();
 
-    llmId    = llmData.llm_id;
-    console.log(`[create-agent] ✅ LLM created — id: ${llmId}`);
-
-  } catch (e) {
-    console.error('[create-agent] LLM exception:', e.message);
-    return res.status(500).json({ error: 'LLM creation threw an exception', message: e.message });
-  }
-
-  // ── STEP 2: Create Retell Agent ───────────────────────────────────────────
-  console.log('[create-agent] Step 2: Creating Retell Agent…');
-
-  try {
-    const agentBody = {
-  response_engine : {
-    type   : 'retell-llm',
-    llm_id : llmId,
-  },
-  voice_id                  : voiceId,
-  agent_name                : `${bizName || 'Demo'} — Emma (AI Receptionist)`,
-  language                  : 'en-US',
-  enable_backchannel        : true,
-  normalize_for_speech      : true,
-  end_call_after_silence_ms : 30000,
-  max_call_duration_ms      : 600000,
-  boosted_keywords          : [
-    'emergency', 'urgent', 'dispatch', 'available', 'help',
-    ...(niche ? [niche] : []),
-  ],
-};
-
-    console.log('[create-agent] Agent payload:', JSON.stringify(agentBody, null, 2));
-
-    const agentRes  = await fetch(`${RETELL}/create-agent`, {
+    // ── STEP 2: Create Retell Agent ────────────────────────────────────────
+    const agentRes = await fetch('https://api.retellai.com/create-agent', {
       method  : 'POST',
-      headers : {
-        Authorization  : `Bearer ${RETELL_API_KEY}`,
-        'Content-Type' : 'application/json',
-      },
-      body : JSON.stringify(agentBody),
+      headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
+      body    : JSON.stringify({
+        llm_websocket_url        : llmData.llm_websocket_url,
+        agent_name               : agentDisplayName,
+        voice_id                 : VOICE_ID,
+        language                 : 'en-US',
+        responsiveness           : 1,
+        interruption_sensitivity : 1,
+        enable_backchannel       : true,
+        backchannel_frequency    : 0.8,
+        backchannel_words        : ['got it', 'sure', 'okay', 'absolutely'],
+        ambient_sound            : 'office',
+        ambient_sound_volume     : 0.1,
+        reminder_trigger_ms      : 10000,
+        reminder_max_count       : 2
+      })
     });
 
-    const agentData = await agentRes.json();
-    console.log(`[create-agent] Agent response (${agentRes.status}):`, JSON.stringify(agentData, null, 2));
-
     if (!agentRes.ok) {
-      return res.status(agentRes.status).json({ error: 'Agent creation failed', details: agentData });
+      const err = await agentRes.text();
+      throw new Error(`Agent creation failed: ${err}`);
     }
-
-    const agentId = agentData.agent_id;
-    console.log(`[create-agent] ✅ Agent created — id: ${agentId}`);
+    const agentData = await agentRes.json();
 
     return res.json({
       success   : true,
-      agentId,
-      llmId,
-      agentName : agentData.agent_name,
+      agentId   : agentData.agent_id,
+      llmId     : llmData.llm_id,
+      agentName : agentDisplayName
     });
 
-  } catch (e) {
-    console.error('[create-agent] Agent exception:', e.message);
-    return res.status(500).json({ error: 'Agent creation threw an exception', message: e.message });
+  } catch (error) {
+    console.error('create-agent error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -485,6 +566,7 @@ app.post('/create-web-call', async (req, res) => {
     agentCallCounts[agentId] = count + 1;
     console.log(`[create-web-call] Agent ${agentId} — ${agentCallCounts[agentId]}/5 calls used`);
     console.log(`[create-web-call] ✅ Call created — id: ${data.call_id}`);
+
     return res.json({
       success     : true,
       accessToken : data.access_token,
@@ -505,7 +587,7 @@ app.post('/create-web-call', async (req, res) => {
 //   endDate   {YYYY-MM-DD} REQUIRED
 //   timezone  {IANA string} optional — default: America/New_York
 //
-// Returns: { success, slots: [{ date, startTime, endTime, ... }] }
+// Returns: { success, slots: [{ date, startTime }] }
 // ─────────────────────────────────────────────────────────────────────────────
 app.get('/check-availability', async (req, res) => {
   if (!guardEnv('CRM_API_KEY', res))     return;
@@ -519,16 +601,13 @@ app.get('/check-availability', async (req, res) => {
 
   try {
     const startTs = new Date(startDate).getTime();
-const endTs   = new Date(endDate).getTime();
+    const endTs   = new Date(endDate).getTime();
 
-const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
-  `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
+    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
+      `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
 
     const crmRes = await fetch(url, {
-      headers : {
-        Authorization : `Bearer ${CRM_API_KEY}`,
-        Version       : '2021-04-15',
-      },
+      headers : { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15' },
     });
 
     const data = await crmRes.json();
@@ -538,14 +617,13 @@ const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
       return res.status(crmRes.status).json({ error: 'Availability check failed', details: data });
     }
 
-    // Flatten all days into a single slots array
     const slots = [];
-for (const [key, value] of Object.entries(data || {})) {
-  if (key === 'traceId') continue;
-  if (value && Array.isArray(value.slots)) {
-    value.slots.forEach(slotTime => slots.push({ date: key, startTime: slotTime }));
-  }
-}
+    for (const [key, value] of Object.entries(data || {})) {
+      if (key === 'traceId') continue;
+      if (value && Array.isArray(value.slots)) {
+        value.slots.forEach(slotTime => slots.push({ date: key, startTime: slotTime }));
+      }
+    }
 
     return res.json({ success: true, slots, raw: data });
 
@@ -576,22 +654,18 @@ app.get('/check-specific-time', async (req, res) => {
   }
 
   try {
-    // Fetch the requested day + next day (endDate is exclusive in GHL API)
     const nextDay = new Date(`${date}T12:00:00Z`);
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const endDate = nextDay.toISOString().split('T')[0];
 
     const startTs = new Date(date).getTime();
-const endTs   = new Date(endDate).getTime();
+    const endTs   = new Date(endDate).getTime();
 
-const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
-  `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
+    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
+      `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
 
     const crmRes = await fetch(url, {
-      headers : {
-        Authorization : `Bearer ${CRM_API_KEY}`,
-        Version       : '2021-04-15',
-      },
+      headers : { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15' },
     });
 
     const data = await crmRes.json();
@@ -601,20 +675,20 @@ const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
     }
 
     const dayData   = data[date];
-const daySlots  = (dayData && Array.isArray(dayData.slots)) ? dayData.slots : [];
-const requested = time.slice(0, 5);
+    const daySlots  = (dayData && Array.isArray(dayData.slots)) ? dayData.slots : [];
+    const requested = time.slice(0, 5);
 
-const match = daySlots.find(slotTime => {
-  const slotHHMM = new Date(slotTime).toLocaleTimeString('en-GB', {
-    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone,
-  });
-  return slotHHMM === requested;
-});
+    const match = daySlots.find(slotTime => {
+      const slotHHMM = new Date(slotTime).toLocaleTimeString('en-GB', {
+        hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone,
+      });
+      return slotHHMM === requested;
+    });
 
-return res.json({
-  success   : true,
-  available : !!match,
-  slot      : match ? { startTime: match } : null,
+    return res.json({
+      success   : true,
+      available : !!match,
+      slot      : match ? { startTime: match } : null,
       date,
       time      : requested,
       timezone,
@@ -630,14 +704,14 @@ return res.json({
 // POST /book-appointment
 //
 // Body:
-//   firstName {string} REQUIRED
-//   lastName  {string} REQUIRED
-//   email     {string} REQUIRED
-//   startTime {ISO 8601 string} REQUIRED  — e.g. "2026-08-10T14:00:00-05:00"
-//   phone     {string} optional
-//   endTime   {ISO 8601 string} optional  — defaults to startTime + 30 min
-//   timezone  {IANA string} optional      — default: America/New_York
-//   notes     {string} optional
+//   firstName {string}     REQUIRED
+//   lastName  {string}     REQUIRED
+//   email     {string}     REQUIRED
+//   startTime {ISO 8601}   REQUIRED
+//   phone     {string}     optional
+//   endTime   {ISO 8601}   optional — defaults to startTime + 30 min
+//   timezone  {IANA string} optional — default: America/New_York
+//   notes     {string}     optional
 //
 // Returns: { success, appointmentId, startTime, endTime, contactId }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -656,7 +730,6 @@ app.post('/book-appointment', async (req, res) => {
     notes     = '',
   } = req.body;
 
-  // Validate required fields
   const missing = [];
   if (!firstName) missing.push('firstName');
   if (!lastName)  missing.push('lastName');
@@ -667,7 +740,6 @@ app.post('/book-appointment', async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields', missing });
   }
 
-  // Resolve endTime — default: startTime + 30 min
   const resolvedEndTime = endTime || (() => {
     const d = new Date(startTime);
     d.setMinutes(d.getMinutes() + 30);
@@ -722,7 +794,7 @@ app.post('/book-appointment', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RETELL TOOL WEBHOOK — POST /retell-tools/check-availability
-// Called by Retell LLM during a live call when agent needs available slots
+// Called by Retell LLM during a live call when agent needs available slots.
 // Body from Retell: { call_id, name, arguments: { date, timezone } }
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/retell-tools/check-availability', async (req, res) => {
@@ -755,45 +827,40 @@ app.post('/retell-tools/check-availability', async (req, res) => {
     }
 
     const dayData  = data[date];
-const allSlots = (dayData && Array.isArray(dayData.slots)) ? dayData.slots : [];
+    const allSlots = (dayData && Array.isArray(dayData.slots)) ? dayData.slots : [];
 
-// Filter to 9 AM – 7 PM in caller's timezone for proactive suggestions
-const daySlots = allSlots.filter(slotTime => {
-  const timeStr = new Date(slotTime).toLocaleTimeString('en-GB', {
-    hour     : '2-digit',
-    minute   : '2-digit',
-    hour12   : false,
-    timeZone : timezone,
-  }); // → "HH:MM"
-  const hour = parseInt(timeStr.split(':')[0], 10);
-  return hour >= 9 && hour < 19;
-});
+    // Filter to 9 AM – 7 PM in caller's timezone for proactive suggestions
+    const daySlots = allSlots.filter(slotTime => {
+      const timeStr = new Date(slotTime).toLocaleTimeString('en-GB', {
+        hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone,
+      });
+      const hour = parseInt(timeStr.split(':')[0], 10);
+      return hour >= 9 && hour < 19;
+    });
 
-if (daySlots.length === 0 && allSlots.length > 0) {
-  const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  return res.json({ result: `I don't have any openings during regular hours on ${dateStr}. Would you like me to check another day, or would an early morning or evening slot work for you?` });
-}
+    if (daySlots.length === 0 && allSlots.length > 0) {
+      const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      return res.json({ result: `I don't have any openings during regular hours on ${dateStr}. Would you like me to check another day, or would an early morning or evening slot work for you?` });
+    }
 
-if (daySlots.length === 0) {
+    if (daySlots.length === 0) {
       const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
       return res.json({ result: `Unfortunately there are no openings on ${dateStr}. Would you like me to check another day?` });
     }
 
-    // Format up to 5 slots as human-readable times
-    const formatted = daySlots.slice(0, 5).map(slotTime => {
-  return new Date(slotTime).toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
-  });
-}).join(', ');
+    const formatted = daySlots.slice(0, 5).map(slotTime =>
+      new Date(slotTime).toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
+      })
+    ).join(', ');
 
-    const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-
+    const dateStr   = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
     const slotCount = daySlots.slice(0, 5).length;
-const result = slotCount === 1
-  ? `On ${dateStr} I have one opening at ${formatted}. Does that work for you?`
-  : `On ${dateStr} I have openings at: ${formatted}. Which of those works best for you?`;
+    const result    = slotCount === 1
+      ? `On ${dateStr} I have one opening at ${formatted}. Does that work for you?`
+      : `On ${dateStr} I have openings at: ${formatted}. Which of those works best for you?`;
 
-return res.json({ result });
+    return res.json({ result });
 
   } catch (e) {
     console.error('[retell-tools/check-availability] Exception:', e.message);
@@ -801,17 +868,15 @@ return res.json({ result });
   }
 });
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // RETELL TOOL WEBHOOK — POST /retell-tools/book-appointment
-// Called by Retell LLM during a live call to book the confirmed slot
-// Body from Retell: { call_id, name, arguments: { firstName, lastName, email, phone, startTime, timezone } }
+// Called by Retell LLM during a live call to book the confirmed slot.
+// Body from Retell: { call_id, name, arguments: { firstName, lastName, email, startTime, timezone } }
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/retell-tools/book-appointment', async (req, res) => {
-  const args      = req.body.arguments || {};
+  const args = req.body.arguments || {};
   const { firstName, lastName, email, phone = '', startTime, timezone = 'America/New_York' } = args;
 
-  // Check we have everything we need
   const missing = [];
   if (!firstName) missing.push('first name');
   if (!lastName)  missing.push('last name');
@@ -850,7 +915,7 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
     const data = await crmRes.json();
 
     if (!crmRes.ok) {
-      console.error('[retell-tools/book-appointment] GHL error:', JSON.stringify(data, null, 2));
+      console.error('[retell-tools/book-appointment] Hexona Systems error:', JSON.stringify(data, null, 2));
       return res.json({ result: "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot." });
     }
 
@@ -884,10 +949,10 @@ app.use((err, _req, res, _next) => {
 app.listen(PORT, () => {
   console.log('\n=== Creative Copyz Voice AI Proxy ===');
   console.log('Port              : ' + PORT);
-  console.log('RETELL_API_KEY    : ' + (RETELL_API_KEY    ? 'SET' : 'MISSING - set in Railway env vars'));
-  console.log('CRM_API_KEY       : ' + (CRM_API_KEY       ? 'SET' : 'MISSING - set in Railway env vars'));
-  console.log('CRM_CALENDAR_ID   : ' + (CRM_CALENDAR_ID   ? 'SET' : 'MISSING - set in Railway env vars'));
+  console.log('RETELL_API_KEY    : ' + (RETELL_API_KEY    ? 'SET' : 'MISSING — set in Railway env vars'));
+  console.log('CRM_API_KEY       : ' + (CRM_API_KEY       ? 'SET' : 'MISSING — set in Railway env vars'));
+  console.log('CRM_CALENDAR_ID   : ' + (CRM_CALENDAR_ID   ? 'SET' : 'MISSING — set in Railway env vars'));
   console.log('CRM_LOCATION_ID   : ' + CRM_LOCATION_ID);
-  console.log('RAILWAY_PUBLIC_URL: ' + (RAILWAY_PUBLIC_URL || '(not set - optional)'));
+  console.log('RAILWAY_PUBLIC_URL: ' + (RAILWAY_PUBLIC_URL || '(not set — optional)'));
   console.log('=====================================\n');
 });
