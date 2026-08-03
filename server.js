@@ -483,21 +483,24 @@ app.post('/create-agent', async (req, res) => {
     const agentRes = await fetch('https://api.retellai.com/create-agent', {
       method  : 'POST',
       headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
-      body    : JSON.stringify({
-        llm_websocket_url        : llmData.llm_websocket_url,
-        agent_name               : agentDisplayName,
-        voice_id                 : VOICE_ID,
-        language                 : 'en-US',
-        responsiveness           : 1,
-        interruption_sensitivity : 1,
-        enable_backchannel       : true,
-        backchannel_frequency    : 0.8,
-        backchannel_words        : ['got it', 'sure', 'okay', 'absolutely'],
-        ambient_sound            : 'coffee-shop',
-        ambient_sound_volume     : 0.1,
-        reminder_trigger_ms      : 10000,
-        reminder_max_count       : 2
-      })
+      body: JSON.stringify({
+  response_engine: {
+    type   : 'retell-llm',
+    llm_id : llmData.llm_id
+  },
+  agent_name               : agentDisplayName,
+  voice_id                 : VOICE_ID,
+  language                 : 'en-US',
+  responsiveness           : 1,
+  interruption_sensitivity : 1,
+  enable_backchannel       : true,
+  backchannel_frequency    : 0.8,
+  backchannel_words        : ['got it', 'sure', 'okay', 'absolutely'],
+  ambient_sound            : 'coffee-shop',
+  ambient_sound_volume     : 0.1,
+  reminder_trigger_ms      : 10000,
+  reminder_max_count       : 2
+})
     });
 
     if (!agentRes.ok) {
