@@ -240,6 +240,19 @@ KEY POINTS TO COMMUNICATE
   }
 };
 
+const NICHE_PAGE_URLS = {
+  restoration : `https://creativecopyz.com/restoration-aivoicedemo`,  // e.g. /restoration-demo
+  bailbond    : `https://creativecopyz.com/bailbond-aivoicedemo`,
+  towing      : `https://creativecopyz.com/towing-aivoicedemo`,
+  locksmith   : `https://creativecopyz.com/locksmiths-aivoicedemo`,
+  vet         : `https://creativecopyz.com/emergencyvets-aivoicedemo`,
+  funeral     : `https://creativecopyz.com/funeralhomes-aivoicedemo`,
+  septic      : `https://creativecopyz.com/emergencysepticservices-aivoicedemo`,
+  nemt        : `https://creativecopyz.com/nemt-aivoicedemo`,
+  security    : `https://creativecopyz.com/commsec-aivoicedemo`,
+  roadside    : `https://creativecopyz.com/roadsideassist-aivoicedemo`,
+};
+
 // ============================================================
 // NICHE NORMALIZER
 // Maps any incoming niche string to a template key.
@@ -388,12 +401,14 @@ app.get('/', (_req, res) => {
 app.post('/create-agent', async (req, res) => {
   try {
     const {
-      niche        = 'restoration',
-      businessName = 'Your Business',
-      city         = 'your area',
-      coreServices = '',
-      tagline      = ''
-    } = req.body;
+  niche         = 'restoration',
+  businessName  = 'Your Business',
+  city          = 'your area',
+  coreServices  = '',
+  tagline       = '',
+  primaryColor  = '',
+  secondaryColor= ''
+} = req.body;
 
     const systemPrompt     = buildSystemPrompt({ niche, businessName, city, coreServices, tagline });
     const nicheLabel       = normalizeNiche(niche);
@@ -506,12 +521,18 @@ app.post('/create-agent', async (req, res) => {
     }
     const agentData = await agentRes.json();
 
-    return res.json({
-      success   : true,
-      agentId   : agentData.agent_id,
-      llmId     : llmData.llm_id,
-      agentName : agentDisplayName
-    });
+    const baseUrl = NICHE_PAGE_URLS[nicheLabel] || '';
+const demoUrl = baseUrl
+  ? `${baseUrl}?agent=${agentData.agent_id}&name=${encodeURIComponent(businessName)}&city=${encodeURIComponent(city)}&tagline=${encodeURIComponent(tagline)}&primary=${primaryColor}&secondary=${secondaryColor}&created=${Date.now()}`
+  : '';
+
+return res.json({
+  success   : true,
+  agentId   : agentData.agent_id,
+  llmId     : llmData.llm_id,
+  agentName : agentDisplayName,
+  demoUrl   : demoUrl
+});
 
   } catch (error) {
     console.error('create-agent error:', error.message);
@@ -934,6 +955,62 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /delete-agent
+//
+// Called by the 7-day cleanup workflow.
+// Deletes the Retell agent (and its LLM) for an expired demo.
+//
+// Body:
+//   agentId {string} REQUIRED
+//   llmId   {string} optional — if provided, deletes the LLM too
+//
+// Returns: { success, agentDeleted, llmDeleted }
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/delete-agent', async (req, res) => {
+  const { agentId, llmId } = req.body;
+  if (!agentId) {
+    return res.status(400).json({ error: 'agentId is required' });
+  }
+  const RETELL_KEY = process.env.RETELL_API_KEY;
+  let agentDeleted = false;
+  let llmDeleted   = false;
+  try {
+    // ── Delete Retell Agent ──────────────────────────────────────────────
+    const agentRes = await fetch(`https://api.retellai.com/v2/agents/${agentId}`, {
+      method  : 'DELETE',
+      headers : { 'Authorization': `Bearer ${RETELL_KEY}` },
+    });
+    if (agentRes.ok || agentRes.status === 404) {
+      // 404 = already deleted, treat as success
+      agentDeleted = true;
+      // Remove from in-memory call counter
+      delete agentCallCounts[agentId];
+      console.log(`[delete-agent] ✅ Agent deleted: ${agentId}`);
+    } else {
+      const err = await agentRes.text();
+      console.error(`[delete-agent] Agent delete failed (${agentRes.status}): ${err}`);
+    }
+    // ── Delete Retell LLM (if provided) ────────────────────────────────────
+    if (llmId) {
+      const llmRes = await fetch(`https://api.retellai.com/delete-retell-llm/${llmId}`, {
+        method  : 'DELETE',
+        headers : { 'Authorization': `Bearer ${RETELL_KEY}` },
+      });
+      if (llmRes.ok || llmRes.status === 404) {
+        llmDeleted = true;
+        console.log(`[delete-agent] ✅ LLM deleted: ${llmId}`);
+      } else {
+        const err = await llmRes.text();
+        console.error(`[delete-agent] LLM delete failed (${llmRes.status}): ${err}`);
+      }
+    }
+    return res.json({ success: true, agentDeleted, llmDeleted });
+  } catch (e) {
+    console.error('[delete-agent] Exception:', e.message);
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
 // ─── 404 catch-all ────────────────────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
@@ -945,7 +1022,6 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Unexpected server error', message: err.message });
 });
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log('\n=== Creative Copyz Voice AI Proxy ===');
   console.log('Port              : ' + PORT);
