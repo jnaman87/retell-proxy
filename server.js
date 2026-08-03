@@ -433,21 +433,21 @@ app.post('/create-agent', async (req, res) => {
     speak_during_execution       : true,
     speak_after_execution        : false,
     execution_message_description: 'Let me check availability for you...',
-    variables: [
-      {
-        name       : 'date',
-        type       : 'string',
-        description: 'The calendar date to check, formatted as YYYY-MM-DD. Use the date the caller mentioned, or the next business day if they did not specify.',
-        required   : true
+    url                          : `${RAILWAY_URL}/retell-tools/check-availability`,
+    parameters: {
+      type      : 'object',
+      properties: {
+        date: {
+          type       : 'string',
+          description: 'The calendar date to check, formatted as YYYY-MM-DD. Use the date the caller mentioned, or the next business day if they did not specify.'
+        },
+        timezone: {
+          type       : 'string',
+          description: 'IANA timezone of the caller, e.g. America/New_York. Default to America/New_York if unknown.'
+        }
       },
-      {
-        name       : 'timezone',
-        type       : 'string',
-        description: 'IANA timezone of the caller, e.g. America/New_York. Default to America/New_York if unknown.',
-        required   : false
-      }
-    ],
-    code: `const res = await fetch('${RAILWAY_URL}/retell-tools/check-availability', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ arguments: { date, timezone } }) }); const data = await res.json(); return data.result;`
+      required: ['date']
+    }
   },
   {
     type                         : 'custom',
@@ -456,39 +456,18 @@ app.post('/create-agent', async (req, res) => {
     speak_during_execution       : true,
     speak_after_execution        : false,
     execution_message_description: 'Booking that for you now...',
-    variables: [
-      {
-        name       : 'firstName',
-        type       : 'string',
-        description: "Caller's first name, confirmed and spelled back",
-        required   : true
+    url                          : `${RAILWAY_URL}/retell-tools/book-appointment`,
+    parameters: {
+      type      : 'object',
+      properties: {
+        firstName: { type: 'string', description: "Caller's first name, confirmed and spelled back" },
+        lastName : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
+        email    : { type: 'string', description: "Caller's email address, confirmed character by character" },
+        startTime: { type: 'string', description: 'ISO 8601 datetime string of the selected slot, e.g. 2026-08-10T14:00:00-05:00' },
+        timezone : { type: 'string', description: 'IANA timezone of the caller, e.g. America/New_York' }
       },
-      {
-        name       : 'lastName',
-        type       : 'string',
-        description: "Caller's last name, confirmed and spelled back",
-        required   : true
-      },
-      {
-        name       : 'email',
-        type       : 'string',
-        description: "Caller's email address, confirmed character by character",
-        required   : true
-      },
-      {
-        name       : 'startTime',
-        type       : 'string',
-        description: 'ISO 8601 datetime string of the selected slot, e.g. 2026-08-10T14:00:00-05:00',
-        required   : true
-      },
-      {
-        name       : 'timezone',
-        type       : 'string',
-        description: 'IANA timezone of the caller, e.g. America/New_York',
-        required   : false
-      }
-    ],
-    code: `const res = await fetch('${RAILWAY_URL}/retell-tools/book-appointment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ arguments: { firstName, lastName, email, startTime, timezone } }) }); const data = await res.json(); return data.result;`
+      required: ['firstName', 'lastName', 'email', 'startTime']
+    }
   }
 ]
       })
