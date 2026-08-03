@@ -493,7 +493,7 @@ app.post('/create-agent', async (req, res) => {
         enable_backchannel       : true,
         backchannel_frequency    : 0.8,
         backchannel_words        : ['got it', 'sure', 'okay', 'absolutely'],
-        ambient_sound            : 'office',
+        ambient_sound            : 'coffee-shop’,
         ambient_sound_volume     : 0.1,
         reminder_trigger_ms      : 10000,
         reminder_max_count       : 2
