@@ -11,11 +11,15 @@
  *   GET  /check-availability   → fetch free calendar slots
  *   GET  /check-specific-time  → check if a specific slot is free
  *   POST /book-appointment     → book a Hexona Systems calendar appointment
+ *   GET  /demo-config/:slug    → JSON config for a demo landing page
+ *   GET  /:slug                → serve the niche demo landing page
  */
 
 const express  = require('express');
 const cors     = require('cors');
 const fetch    = require('node-fetch'); // v2 — CommonJS compatible
+const path     = require('path');
+const fs       = require('fs');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -32,6 +36,50 @@ const CRM_API = 'https://services.leadconnectorhq.com';
 
 // ─── Per-agent call counter — 5 calls max per demo ───────────────────────────
 const agentCallCounts = {};
+
+// ─── Demo records — keyed by slug ────────────────────────────────────────────
+const demoRecords   = {}; // { [slug]: { agentId, llmId, niche, businessName, city, tagline, primaryColor, secondaryColor, created, callsUsed, maxCalls } }
+const agentIdToSlug = {}; // reverse lookup
+
+// City abbreviations for slug collision suffix
+const CITY_ABBREV = {
+  'houston':'hou','dallas':'dfw','dallas-fort worth':'dfw','phoenix':'phx',
+  'atlanta':'atl','miami':'mia','orlando':'orl','tampa':'tpa',
+  'charlotte':'clt','nashville':'bna','denver':'den','las vegas':'las',
+  'san antonio':'sat','austin':'aus','raleigh':'rdu',
+  'toronto':'yyz','calgary':'yyc','vancouver':'yvr',
+  'sydney':'syd','melbourne':'mel','brisbane':'bne'
+};
+
+function generateSlug(businessName, city) {
+  const base = (businessName || 'business')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 24);
+
+  const plain = `${base}-aivoicedemo`;
+  if (!demoRecords[plain]) return plain;
+
+  const abbrev = CITY_ABBREV[(city || '').toLowerCase()]
+    || (city || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 3)
+    || 'x';
+  const withCity = `${base}-${abbrev}-aivoicedemo`;
+  if (!demoRecords[withCity]) return withCity;
+
+  let n = 2;
+  while (demoRecords[`${base}-${abbrev}-${n}-aivoicedemo`]) n++;
+  return `${base}-${abbrev}-${n}-aivoicedemo`;
+}
+
+const htmlTemplates = {}; // cache
+
+function getNicheTemplate(niche) {
+  if (!htmlTemplates[niche]) {
+    const file = path.join(__dirname, 'templates', `${niche}.html`);
+    htmlTemplates[niche] = fs.readFileSync(file, 'utf8');
+  }
+  return htmlTemplates[niche];
+}
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors({ origin: '*' }));
@@ -238,19 +286,6 @@ KEY POINTS TO COMMUNICATE
 - GPS-based dispatch for fast arrival`,
     openingLine: 'Thank you for calling {businessName}, this is Emma. Are you broken down right now? Let me get help on the way.'
   }
-};
-
-const NICHE_PAGE_URLS = {
-  restoration : `https://creativecopyz.com/restoration-aivoicedemo`,  // e.g. /restoration-demo
-  bailbond    : `https://creativecopyz.com/bailbond-aivoicedemo`,
-  towing      : `https://creativecopyz.com/towing-aivoicedemo`,
-  locksmith   : `https://creativecopyz.com/locksmiths-aivoicedemo`,
-  vet         : `https://creativecopyz.com/emergencyvets-aivoicedemo`,
-  funeral     : `https://creativecopyz.com/funeralhomes-aivoicedemo`,
-  septic      : `https://creativecopyz.com/emergencysepticservices-aivoicedemo`,
-  nemt        : `https://creativecopyz.com/nemt-aivoicedemo`,
-  security    : `https://creativecopyz.com/commsec-aivoicedemo`,
-  roadside    : `https://creativecopyz.com/roadsideassist-aivoicedemo`,
 };
 
 // ============================================================
@@ -509,18 +544,33 @@ app.post('/create-agent', async (req, res) => {
     }
     const agentData = await agentRes.json();
 
-    const baseUrl = NICHE_PAGE_URLS[nicheLabel] || '';
-const demoUrl = baseUrl
-  ? `${baseUrl}?agent=${agentData.agent_id}&name=${encodeURIComponent(businessName)}&city=${encodeURIComponent(city)}&tagline=${encodeURIComponent(tagline)}&primary=${primaryColor}&secondary=${secondaryColor}&created=${Date.now()}`
-  : '';
+    const slug    = generateSlug(businessName, city);
+    const DEMO_BASE = process.env.DEMO_BASE_URL || 'https://demo.creativecopyz.com';
+    const demoUrl = `${DEMO_BASE}/${slug}`;
 
-return res.json({
-  success   : true,
-  agentId   : agentData.agent_id,
-  llmId     : llmData.llm_id,
-  agentName : agentDisplayName,
-  demoUrl   : demoUrl
-});
+    demoRecords[slug] = {
+      agentId        : agentData.agent_id,
+      llmId          : llmData.llm_id,
+      niche          : nicheLabel,
+      businessName,
+      city,
+      tagline,
+      primaryColor,
+      secondaryColor,
+      created        : Date.now(),
+      callsUsed      : 0,
+      maxCalls       : 5
+    };
+    agentIdToSlug[agentData.agent_id] = slug;
+
+    return res.json({
+      success   : true,
+      agentId   : agentData.agent_id,
+      llmId     : llmData.llm_id,
+      agentName : agentDisplayName,
+      demoUrl,
+      slug
+    });
 
   } catch (error) {
     console.error('create-agent error:', error.message);
@@ -573,6 +623,9 @@ app.post('/create-web-call', async (req, res) => {
     }
 
     agentCallCounts[agentId] = count + 1;
+    const _slug = agentIdToSlug[agentId];
+    if (_slug && demoRecords[_slug]) demoRecords[_slug].callsUsed = agentCallCounts[agentId];
+
     console.log(`[create-web-call] Agent ${agentId} — ${agentCallCounts[agentId]}/5 calls used`);
     console.log(`[create-web-call] ✅ Call created — id: ${data.call_id}`);
 
@@ -857,14 +910,14 @@ app.post('/retell-tools/check-availability', async (req, res) => {
       return res.json({ result: `Unfortunately there are no openings on ${dateStr}. Would you like me to check another day?` });
     }
 
-    const formatted = daySlots.slice(0, 5).map(slotTime =>
-      new Date(slotTime).toLocaleTimeString('en-US', {
-        hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
-      })
-    ).join(', ');
+    const formatted = daySlots.slice(0, 3).map(slotTime =>
+  new Date(slotTime).toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
+  })
+).join(', ');
 
     const dateStr   = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-    const slotCount = daySlots.slice(0, 5).length;
+    const slotCount = daySlots.slice(0, 3).length;
     const result    = slotCount === 1
       ? `On ${dateStr} I have one opening at ${formatted}. Does that work for you?`
       : `On ${dateStr} I have openings at: ${formatted}. Which of those works best for you?`;
@@ -944,6 +997,69 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /demo-config/:slug
+//
+// Returns the public config for a demo landing page, keyed by slug.
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/demo-config/:slug', (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const record = demoRecords[req.params.slug];
+  if (!record) return res.status(404).json({ error: 'Not found' });
+  return res.json({
+    agentId        : record.agentId,
+    niche          : record.niche,
+    businessName   : record.businessName,
+    city           : record.city,
+    tagline        : record.tagline,
+    primaryColor   : record.primaryColor,
+    secondaryColor : record.secondaryColor,
+    created        : record.created,
+    callsUsed      : record.callsUsed,
+    maxCalls       : record.maxCalls
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /:slug
+//
+// Serves the niche demo landing page HTML for a given slug, with
+// window.DEMO_CONFIG injected into <head>.
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', (req, res, next) => {
+  const { slug } = req.params;
+  // Let API routes fall through
+  const API_PREFIXES = ['demo-config','create-agent','create-web-call',
+    'book-appointment','check-availability','check-specific-time',
+    'delete-agent','retell-tools'];
+  if (API_PREFIXES.some(p => slug.startsWith(p))) return next();
+
+  const record = demoRecords[slug];
+  if (!record) return res.status(404).send('<!doctype html><html><body><h2 style="font-family:sans-serif;padding:40px">This demo has expired or does not exist.</h2></body></html>');
+
+  let html;
+  try { html = getNicheTemplate(record.niche); }
+  catch (e) { return res.status(500).send('Template error'); }
+
+  const injected = `<script>window.DEMO_CONFIG=${JSON.stringify({
+    slug,
+    agentId        : record.agentId,
+    businessName   : record.businessName,
+    city           : record.city,
+    tagline        : record.tagline,
+    primaryColor   : record.primaryColor,
+    secondaryColor : record.secondaryColor,
+    created        : record.created,
+    callsUsed      : record.callsUsed,
+    maxCalls       : record.maxCalls,
+    focus          : 'full-service'
+  })};</script>`;
+
+  html = html.replace('<head>', '<head>' + injected);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  return res.send(html);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /delete-agent
 //
 // Called by the 7-day cleanup workflow.
@@ -974,6 +1090,8 @@ app.post('/delete-agent', async (req, res) => {
       agentDeleted = true;
       // Remove from in-memory call counter
       delete agentCallCounts[agentId];
+      const _slug = agentIdToSlug[agentId];
+      if (_slug) { delete demoRecords[_slug]; delete agentIdToSlug[agentId]; }
       console.log(`[delete-agent] ✅ Agent deleted: ${agentId}`);
     } else {
       const err = await agentRes.text();
