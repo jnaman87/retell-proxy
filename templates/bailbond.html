@@ -580,7 +580,7 @@ if (window.__demoExpired) return;
           if (!accessToken) throw new Error('Missing access token');
           client = new window.RetellWebClient();
           client.on('call_started',        function () { callConnected = true; setCallState('listening', 'Listening…'); });
-          client.on('agent_start_talking',  function () { setCallState('speaking',  'Emma speaking…'); });
+          client.on('agent_start_talking',  function () { setCallState('speaking',  'Emma is speaking…'); });
           client.on('agent_stop_talking',   function () { setCallState('listening', 'Listening…'); });
           client.on('call_ended',           function () { finishCall('Call ended.'); });
           client.on('error',                function () { finishCall('The call could not be completed.'); });
