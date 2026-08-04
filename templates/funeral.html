@@ -492,7 +492,7 @@
         var waited = 0;
         while (!window.RetellWebClient && waited < 8000) { await new Promise(function(r) { setTimeout(r, 100); }); waited += 100; }
         if (!window.RetellWebClient) { setCallState('', 'Voice service is unavailable. Please try again shortly.'); return; }
-        isCalling = true; setCallState('connecting', 'Connecting you to Grace…');
+        isCalling = true; setCallState('connecting', 'Connecting you to Emma…');
         try {
           var response = await fetch('https://retell-proxy-production.up.railway.app/create-web-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId: agentId }) });
           if (!response.ok) throw new Error('Call request failed');
@@ -509,7 +509,7 @@
           if (!accessToken) throw new Error('Missing access token');
           client = new window.RetellWebClient();
           client.on('call_started',        function () { callConnected = true; setCallState('listening', 'Listening…'); });
-          client.on('agent_start_talking',  function () { setCallState('speaking',  'Grace is speaking…'); });
+          client.on('agent_start_talking',  function () { setCallState('speaking',  'Emma is speaking…'); });
           client.on('agent_stop_talking',   function () { setCallState('listening', 'Listening…'); });
           client.on('call_ended',           function () { finishCall('Call ended.'); });
           client.on('error',                function () { finishCall('The call could not be completed.'); });
