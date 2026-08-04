@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="A tailored AI voice experience for non-emergency medical transportation.">
+  <title>AI Voice Experience</title>
+  <script>
+    /* Apply the palette before first paint. */
+    (function () {
+      function parseHex(hex) {
+        var value = String(hex || '').replace(/[^a-fA-F0-9]/g, '');
+        if (value.length === 3) value = value.split('').map(function (c) { return c + c; }).join('');
+        return /^[a-fA-F0-9]{6}$/.test(value) ? value.toUpperCase() : '0891B2';
+      }
+      function applyPalette(primary, secondary) {
+        var pHex = parseHex(primary), sHex = parseHex(secondary);
+        var toArray = function (hex) { return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)]; };
+        var p = toArray(pHex), s = toArray(sHex);
+        var mix = function (a, b, t) { return a.map(function (v, i) { return Math.round(v * (1 - t) + b[i] * t); }); };
+        var BLACK = [0, 0, 0], WHITE = [255, 255, 255];
+        var toRgb = function (c) { return 'rgb(' + c.join(',') + ')'; };
+        var toRgba = function (c, a) { return 'rgba(' + c.join(',') + ',' + a + ')'; };
+        var vars = {
+          '--p': '#' + pHex, '--s': '#' + sHex,
+          '--b0': toRgb(mix(s, BLACK, .45)), '--b1': '#' + sHex,
+          '--b2': toRgb(mix(s, WHITE, .06)), '--b3': toRgb(mix(s, WHITE, .12)),
+          '--gl': toRgba(p, .35), '--gs': toRgba(p, .12), '--bd': toRgba(p, .20),
+          '--t': '#F0F0F0', '--tm': 'rgba(240,240,240,.44)', '--td': 'rgba(240,240,240,.20)'
+        };
+        Object.keys(vars).forEach(function (key) { document.documentElement.style.setProperty(key, vars[key]); });
+      }
+      var _cfg = window.DEMO_CONFIG || {};
+      var params = new URLSearchParams(location.search); // kept for fallback only
+      applyPalette(_cfg.primaryColor || params.get('primary') || '0891B2',
+                   _cfg.secondaryColor || params.get('secondary') || '164E63');
+    }());
+  </script>
+  <style>
+    /* =========================================================
+       FOUNDATION
+       ========================================================= */
+    :root { --headlinefont: ui-sans-serif, system-ui, sans-serif; --contentfont: ui-sans-serif, system-ui, sans-serif; --p: #0891B2; --s: #164E63; --b0: rgb(12,43,54); --b1: #164E63; --b2: rgb(36,89,108); --b3: rgb(50,99,118); --gl: rgba(8,145,178,.35); --gs: rgba(8,145,178,.12); --bd: rgba(8,145,178,.20); --t: #F0F0F0; --tm: rgba(240,240,240,.44); --td: rgba(240,240,240,.20); }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    html { background: var(--b0); }
+    body { margin: 0; overflow-x: hidden; background: var(--b0) !important; color: var(--t); font-family: var(--contentfont); font-size: 16px; line-height: 1.55; }
+    button { font: inherit; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--p); outline-offset: 4px; }
+    .page { min-height: 100vh; overflow: hidden; background: var(--b0); color: var(--t); }
+    .page h1, .page h2, .page h3 { color: var(--t); }
+    .page p { color: var(--tm); }
+    .shell { width: min(1120px, calc(100% - 48px)); margin: 0 auto; }
+    .eyebrow { margin: 0 0 16px; color: var(--p); font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+    h1, h2, h3 { margin: 0; font-family: var(--headlinefont); font-weight: 600; letter-spacing: -.045em; line-height: 1.02; }
+    h1 { max-width: 890px; font-size: clamp(44px, 7vw, 88px); }
+    h2 { max-width: 700px; font-size: clamp(34px, 5vw, 58px); }
+    h3 { font-size: 20px; }
+    p { margin: 0; color: var(--tm); }
+    .section { padding: 128px 0; border-top: 1px solid var(--td); }
+    .button { display: inline-flex; align-items: center; justify-content: center; min-height: 50px; padding: 0 21px; border: 1px solid var(--bd); border-radius: 999px; background: var(--p); color: var(--b0); cursor: pointer; font-size: 14px; font-weight: 700; text-decoration: none; transition: transform .22s ease, box-shadow .22s ease, background .22s ease; }
+    .button:hover { box-shadow: 0 8px 28px var(--gl); transform: translateY(-2px); }
+    .muted-rule { height: 1px; background: var(--td); }
+
+    /* =========================================================
+       HERO
+       ========================================================= */
+    .hero { min-height: 760px; padding: 30px 0 72px; display: flex; flex-direction: column; justify-content: space-between; }
+    .topline { display: flex; align-items: center; justify-content: space-between; color: var(--tm); font-size: 13px; }
+    .topline .mark { display: flex; gap: 9px; align-items: center; color: var(--t); font-family: var(--headlinefont); font-weight: 600; }
+    .mark-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--p); box-shadow: 0 0 18px var(--gl); }
+    .hero-copy { padding: 96px 0 50px; }
+    .hero-copy h1 span { color: var(--p); }
+    #biz-tagline { max-width: 650px; margin-top: 27px; font-size: clamp(18px, 2vw, 23px); line-height: 1.4; }
+    .hero-support { max-width: 560px; margin-top: 20px; }
+    .hero-actions { margin-top: 36px; }
+    .response-signal { display: flex; align-items: center; gap: 18px; padding-top: 25px; border-top: 1px solid var(--td); }
+    .signal-waves { display: flex; align-items: center; gap: 5px; height: 34px; }
+    .signal-waves i { display: block; width: 3px; border-radius: 10px; background: var(--p); box-shadow: 0 0 12px var(--gl); transform-origin: center; animation: wave 2.8s ease-in-out infinite; }
+    .signal-waves i:nth-child(1), .signal-waves i:nth-child(7) { height: 10px; } .signal-waves i:nth-child(2), .signal-waves i:nth-child(6) { height: 19px; animation-delay: -.3s; } .signal-waves i:nth-child(3), .signal-waves i:nth-child(5) { height: 28px; animation-delay: -.6s; } .signal-waves i:nth-child(4) { height: 34px; animation-delay: -.9s; }
+    .response-signal p { font-size: 13px; } .response-signal strong { color: var(--t); font-weight: 600; }
+    @keyframes wave { 50% { transform: scaleY(.55); opacity: .55; } }
+
+    /* =========================================================
+       VOICE EXPERIENCE
+       ========================================================= */
+    .voice-intro { display: grid; grid-template-columns: .8fr 1.2fr; gap: 64px; align-items: end; }
+    .voice-intro > p { max-width: 430px; font-size: 18px; }
+    .voice-stage { position: relative; display: grid; place-items: center; min-height: 610px; margin-top: 52px; isolation: isolate; }
+    .voice-stage::before { position: absolute; width: min(520px, 92vw); aspect-ratio: 1; z-index: -1; border-radius: 50%; background: var(--gs); content: ''; filter: blur(65px); transition: opacity .6s ease, transform .6s ease; }
+    .voice-stage.active::before { opacity: 1; transform: scale(1.22); }
+    .voice-stage > div { position: relative; width: min(450px, 92vw); text-align: center; }
+    .orb-control { position: relative; display: grid; width: 100%; aspect-ratio: 1; place-items: center; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+    .orb-control::before { position: absolute; inset: 17%; border-radius: 50%; background: var(--gs); box-shadow: 0 0 64px var(--gs); content: ''; filter: blur(22px); opacity: .7; transition: opacity .4s ease, transform .4s ease; }
+    .orb-control:hover::before { opacity: 1; transform: scale(1.08); }
+    #ai-orb { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    .orb-center { position: relative; z-index: 2; display: grid; width: 76px; height: 76px; place-items: center; border: 1px solid var(--bd); border-radius: 50%; background: var(--b2); box-shadow: 0 0 38px var(--gs); transition: transform .35s ease, box-shadow .35s ease; }
+    .orb-control:hover .orb-center { transform: scale(1.06); }
+    .mic { position: relative; width: 19px; height: 28px; border: 2px solid var(--p); border-radius: 12px; }
+    .mic::before { position: absolute; bottom: -9px; left: 50%; width: 29px; height: 15px; border: 2px solid var(--p); border-top: 0; border-radius: 0 0 16px 16px; content: ''; transform: translateX(-50%); }
+    .mic::after { position: absolute; bottom: -15px; left: 50%; width: 2px; height: 7px; background: var(--p); box-shadow: -6px 7px 0 -0.2px var(--p), 6px 7px 0 -0.2px var(--p); content: ''; transform: translateX(-50%); }
+    .voice-label { position: absolute; z-index: 3; top: 58%; left: 50%; min-width: 126px; margin: 0; padding: 8px 15px; border: 1px solid var(--bd); border-radius: 999px; background: var(--b2); box-shadow: 0 10px 28px var(--gs); color: var(--t); font-family: var(--headlinefont); font-size: 15px; letter-spacing: -.02em; transform: translateX(-50%); pointer-events: none; }
+    #call-status { min-height: 24px; margin-top: -6px; color: var(--tm); font-size: 13px; }
+    .voice-prompt { max-width: 450px; margin: 12px auto 0; text-align: center; font-size: 14px; }
+    .voice-stage.listening .orb-center { box-shadow: 0 0 55px var(--gl); }
+    .voice-stage.speaking .orb-center { box-shadow: 0 0 76px var(--gl); transform: scale(1.08); }
+
+    /* =========================================================
+       CONTENT SECTIONS
+       ========================================================= */
+    .two-column { display: grid; grid-template-columns: 1fr .8fr; gap: 12vw; align-items: center; }
+    .section-lead { margin-top: 26px; max-width: 500px; font-size: 18px; }
+    .pressure-map { position: relative; aspect-ratio: 1; display: grid; place-items: center; border: 1px solid var(--td); border-radius: 50%; background: radial-gradient(circle, var(--b2), var(--b0) 66%); }
+    .pressure-map::before, .pressure-map::after { position: absolute; border: 1px solid var(--bd); border-radius: 50%; content: ''; } .pressure-map::before { inset: 14%; } .pressure-map::after { inset: 31%; }
+    .pressure-core { width: 68px; height: 68px; border-radius: 50%; background: var(--p); box-shadow: 0 0 48px var(--gl); }
+    .map-label { position: absolute; color: var(--tm); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; } .map-label.one { top: 15%; left: 8%; } .map-label.two { top: 60%; right: 3%; } .map-label.three { bottom: 13%; left: 11%; }
+    .flow { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-top: 64px; }
+    .flow::before { position: absolute; top: 25px; right: 10%; left: 10%; height: 1px; background: var(--bd); content: ''; }
+    .flow-step { position: relative; z-index: 1; width: 30%; text-align: center; }
+    .flow-node { display: grid; width: 51px; height: 51px; place-items: center; margin: 0 auto 21px; border: 1px solid var(--bd); border-radius: 50%; background: var(--b0); color: var(--p); font-family: var(--headlinefont); font-size: 14px; box-shadow: 0 0 22px var(--gs); }
+    .flow-step p { max-width: 210px; margin: 9px auto 0; font-size: 14px; }
+    .capability-orbit { position: relative; display: grid; width: min(100%, 790px); aspect-ratio: 1.75; place-items: center; margin: 50px auto 0; border-top: 1px solid var(--td); border-bottom: 1px solid var(--td); }
+    .orbit-line { position: absolute; width: min(46vw, 360px); aspect-ratio: 1; border: 1px solid var(--bd); border-radius: 50%; }
+    .orbit-center { position: relative; z-index: 1; display: grid; width: 96px; height: 96px; place-items: center; border-radius: 50%; background: var(--b2); box-shadow: 0 0 48px var(--gs); color: var(--t); font-family: var(--headlinefont); font-size: 13px; letter-spacing: -.02em; text-align: center; }
+    .orbit-item { position: absolute; display: flex; align-items: center; gap: 9px; color: var(--t); font-size: 13px; white-space: nowrap; } .orbit-item::before { width: 8px; height: 8px; border-radius: 50%; background: var(--p); box-shadow: 0 0 13px var(--gl); content: ''; }
+    .orbit-item.a { top: 11%; left: 12%; } .orbit-item.b { top: 14%; right: 9%; } .orbit-item.c { bottom: 15%; left: 6%; } .orbit-item.d { bottom: 10%; right: 10%; } .orbit-item.e { top: 45%; right: -1%; } .orbit-item.f { top: 47%; left: -1%; }
+
+    /* =========================================================
+       FINAL CTA + FOOTER
+       ========================================================= */
+    .final-cta { padding: 140px 0; text-align: center; }
+    .final-cta h2 { margin: auto; }
+    .final-cta p { max-width: 560px; margin: 25px auto 32px; font-size: 18px; }
+    footer { display: flex; justify-content: space-between; gap: 20px; padding: 26px 0 34px; border-top: 1px solid var(--td); color: var(--tm); font-size: 12px; }
+
+    /* =========================================================
+       RESPONSIVE + MOTION
+       ========================================================= */
+    @media (max-width: 760px) { .shell { width: min(100% - 32px, 1120px); } .hero { min-height: 680px; } .topline > span:last-child { display: none; } .voice-intro, .two-column { grid-template-columns: 1fr; gap: 28px; } .section { padding: 88px 0; } .voice-stage { min-height: 500px; margin-top: 34px; } .voice-label { font-size: 14px; } .pressure-map { width: min(100%, 390px); margin: 12px auto 0; } .flow { display: grid; grid-template-columns: 1fr; gap: 28px; margin-top: 44px; } .flow::before { top: 10%; bottom: 10%; left: 25px; width: 1px; height: auto; } .flow-step { display: grid; grid-template-columns: 52px 1fr; width: 100%; text-align: left; column-gap: 17px; } .flow-node { grid-row: span 2; margin: 0; } .flow-step p { margin: 6px 0 0; } .capability-orbit { width: calc(100% + 10px); margin-left: -5px; aspect-ratio: 1; } .orbit-line { width: 64vw; } .orbit-item { font-size: 11px; } .orbit-item.a { top: 8%; left: 8%; } .orbit-item.b { top: 20%; right: 1%; } .orbit-item.c { bottom: 15%; left: 1%; } .orbit-item.d { bottom: 6%; right: 7%; } .orbit-item.e { top: 47%; right: -3%; } .orbit-item.f { top: 51%; left: -3%; } .final-cta { padding: 100px 0; } footer { flex-direction: column; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+    /* -- Demo expiry timer -- */
+    .demo-timer { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--bd); border-radius: 999px; font-size: 11px; letter-spacing: .04em; color: var(--tm); white-space: nowrap; }
+    .demo-timer .timer-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--p); animation: timerPulse 2s ease-in-out infinite; }
+    .demo-timer.expired { border-color: rgba(239,68,68,.25); color: rgba(239,68,68,.65); }
+    .demo-timer.expired .timer-dot { background: rgb(239,68,68); animation: none; }
+    @keyframes timerPulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
+    /* -- Call counter -- */
+    .call-counter {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      padding: 4px 12px;
+      border: 1px solid var(--bd);
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: .04em;
+      color: var(--tm);
+      white-space: nowrap;
+    }
+    .call-counter-dot {
+      flex-shrink: 0;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--p);
+      animation: timerPulse 2s ease-in-out infinite;
+    }
+    .call-counter.depleted { border-color: rgba(239,68,68,.25); color: rgba(239,68,68,.65); }
+    .call-counter.depleted .call-counter-dot { background: rgb(239,68,68); animation: none; }
+    /* -- Big animated countdown -- */
+    .countdown-section { text-align: center; }
+    .cd-wrap { display: inline-flex; align-items: center; gap: 12px; margin-top: 32px; flex-wrap: wrap; justify-content: center; }
+    .cd-unit { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .cd-block { position: relative; width: 130px; height: 130px; display: flex; align-items: center; justify-content: center; background: var(--b2); border: 1px solid var(--bd); border-radius: 18px; box-shadow: 0 0 40px var(--gs); overflow: hidden; }
+    .cd-glow { position: absolute; inset: 15%; border-radius: 50%; background: var(--p); opacity: .07; filter: blur(18px); transition: opacity .4s ease; }
+    .cd-block:hover .cd-glow { opacity: .15; }
+    .cd-num { position: relative; z-index: 1; font-family: var(--headlinefont); font-size: 52px; font-weight: 700; letter-spacing: -.04em; color: var(--t); line-height: 1; }
+    .cd-num.tick { animation: cdTick .28s ease; }
+    .cd-label { font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--tm); }
+    .cd-sep { font-family: var(--headlinefont); font-size: 48px; font-weight: 300; color: var(--td); line-height: 1; margin-bottom: 22px; animation: sepBlink 1s ease-in-out infinite; }
+    @keyframes cdTick { 0% { transform: translateY(0) scale(1); opacity: 1; } 35% { transform: translateY(-10px) scale(.88); opacity: 0; } 65% { transform: translateY(10px) scale(.88); opacity: 0; } 100% { transform: translateY(0) scale(1); opacity: 1; } }
+    @keyframes sepBlink { 0%,100% { opacity: .3; } 50% { opacity: .8; } }
+    @media (max-width: 760px) { .cd-block { width: 72px; height: 72px; border-radius: 12px; } .cd-num { font-size: 30px; } .cd-sep { font-size: 26px; } .cd-wrap { gap: 6px; } }
+    .hero { padding-bottom: 40px; }
+    .countdown-section { border-top: none; padding: 48px 0; }
+    .countdown-section + .section { border-top: none; }
+    .section { border-top: none; }
+    .response-signal { border-top: none; }
+    .capability-orbit { border-top: none; border-bottom: none; }
+    /* -- End Call button -- */
+    .end-call-btn { display: none; margin: 16px auto 0; padding: 0 22px; min-height: 40px; border: 1px solid rgba(239,68,68,.35); border-radius: 999px; background: rgba(239,68,68,.10); color: rgba(239,68,68,.85); font-family: var(--contentfont); font-size: 13px; font-weight: 600; letter-spacing: .02em; cursor: pointer; transition: background .2s ease, border-color .2s ease, color .2s ease; }
+    .end-call-btn:hover { background: rgba(239,68,68,.22); border-color: rgba(239,68,68,.6); color: rgb(239,68,68); }
+    .voice-stage.listening .end-call-btn,
+    .voice-stage.speaking  .end-call-btn { display: inline-flex; align-items: center; gap: 6px; }
+  </style>
+</head>
+<body>
+  <main class="page">
+
+    <!-- HERO -->
+    <section class="hero shell" aria-labelledby="biz-name">
+      <div class="topline"><div class="mark"><span class="mark-dot" aria-hidden="true"></span><span id="top-biz-name">Your Medical Transport</span></div><div style="display:flex;align-items:center;gap:12px;"><span>by <strong style="color:var(--t);font-weight:700">Creative Copyz</strong></span><span id="demo-timer" class="demo-timer"></span></div></div>
+      <div class="hero-copy">
+        <p class="eyebrow" data-copy="heroEyebrow">24/7 non-emergency medical transport</p>
+        <h1 id="biz-name">Your Medical Transport<span>.</span></h1>
+        <p id="biz-tagline">Reliable rides, on time, every time.</p>
+        <p class="hero-support" data-copy="heroSupport">From the first call to a confirmed ride.</p>
+        <div class="hero-actions"><button id="cta-hero-btn" class="button" type="button" data-copy="heroButton">Experience the AI voice</button></div>
+      </div>
+      <div class="response-signal" aria-label="Continuous response signal"><span class="signal-waves" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><p><strong>Always on.</strong> Dialysis runs, hospital discharges, and appointment rides. Every call, every hour.</p></div>
+    </section>
+
+    <!-- AI VOICE EXPERIENCE -->
+    <section class="section"><div class="shell">
+      <div class="voice-intro"><div><p class="eyebrow" data-copy="voiceEyebrow">Your AI dispatch coordinator</p><h2 id="widget-heading">A better first response.</h2></div><p id="widget-sub">Built to book reliable medical rides with clarity and care.</p></div>
+      <div class="voice-stage" id="voice-stage">
+        <div>
+          <button id="start-call-btn" class="orb-control" type="button" aria-label="Start an AI voice call" aria-describedby="call-status">
+            <svg id="ai-orb" viewBox="0 0 400 400" aria-hidden="true"></svg>
+            <span class="orb-center" aria-hidden="true"><span class="mic"></span></span>
+          </button>
+          <div class="voice-label" data-copy="voiceLabel">Tap to Talk</div>
+          <p id="call-status" role="status" aria-live="polite">Ready when you are.</p>
+          <div id="call-counter" class="call-counter" aria-live="polite">
+            <span class="call-counter-dot" aria-hidden="true"></span>
+            <span id="calls-remaining">5</span>&nbsp;of 5 calls remaining
+          </div>
+          <button id="end-call-btn" class="end-call-btn" type="button" aria-label="End the current call">&#9632;&nbsp;End Call</button>
+          <p class="voice-prompt" data-copy="voicePrompt">Ask about dialysis transport, hospital discharges, appointment rides, or booking a trip.</p>
+        </div>
+      </div>
+    </div></section>
+
+    <!-- PAIN POINT -->
+    <section class="section"><div class="shell two-column"><div><p class="eyebrow" data-copy="pressureEyebrow">The call that cannot wait</p><h2 data-copy="pressureHeading">When a patient cannot reach you to book their dialysis ride, they call someone else. And they never come back.</h2><p class="section-lead" data-copy="pressureSupport">Riley handles every call while your drivers stay focused on safe, on-time transport.</p></div><div class="pressure-map" aria-label="Common NEMT call types"><span class="pressure-core" aria-hidden="true"></span><span class="map-label one">Dialysis runs</span><span class="map-label two">Discharges</span><span class="map-label three">Appointments</span></div></div></section>
+
+    <!-- HOW IT WORKS -->
+    <section class="section"><div class="shell"><p class="eyebrow" data-copy="flowEyebrow">Built for medical transport</p><h2 data-copy="flowHeading">Clear from the first call.</h2><div class="flow"><article class="flow-step"><span class="flow-node">01</span><div><h3 data-copy="flowOneTitle">Qualifies</h3><p data-copy="flowOneText">Trip type, pickup location, mobility needs.</p></div></article><article class="flow-step"><span class="flow-node">02</span><div><h3 data-copy="flowTwoTitle">Confirms</h3><p data-copy="flowTwoText">Date, time, vehicle type, any special requirements.</p></div></article><article class="flow-step"><span class="flow-node">03</span><div><h3 data-copy="flowThreeTitle">Books</h3><p data-copy="flowThreeText">Ride confirmed, driver notified.</p></div></article></div><span id="step-biz-name" hidden>your transport company</span></div></section>
+
+    <!-- CAPABILITIES -->
+    <section class="section"><div class="shell"><p class="eyebrow" data-copy="capabilityEyebrow">Designed for NEMT providers</p><h2 data-copy="capabilityHeading">One voice, six essential capabilities.</h2><div class="capability-orbit" aria-label="AI agent capabilities"><span class="orbit-line" aria-hidden="true"></span><span class="orbit-center">Your<br>AI voice</span><span class="orbit-item a">24/7 booking calls</span><span class="orbit-item b">Dialysis transport</span><span class="orbit-item c">Hospital discharges</span><span class="orbit-item d">Wheelchair rides</span><span class="orbit-item e">Appointment trips</span><span class="orbit-item f">Trip confirmation</span></div></div></section>
+
+    <!-- ANIMATED COUNTDOWN -->
+    <section class="section countdown-section">
+      <div class="shell">
+        <p class="eyebrow">This personalised demo expires in</p>
+        <div class="cd-wrap" id="cd-wrap">
+          <div class="cd-unit"><div class="cd-block"><div class="cd-glow"></div><span class="cd-num" id="cd-days">--</span></div><span class="cd-label">Days</span></div>
+          <span class="cd-sep">:</span>
+          <div class="cd-unit"><div class="cd-block"><div class="cd-glow"></div><span class="cd-num" id="cd-hours">--</span></div><span class="cd-label">Hours</span></div>
+          <span class="cd-sep">:</span>
+          <div class="cd-unit"><div class="cd-block"><div class="cd-glow"></div><span class="cd-num" id="cd-minutes">--</span></div><span class="cd-label">Minutes</span></div>
+          <span class="cd-sep">:</span>
+          <div class="cd-unit"><div class="cd-block"><div class="cd-glow"></div><span class="cd-num" id="cd-seconds">--</span></div><span class="cd-label">Seconds</span></div>
+        </div>
+        <p style="margin-top:24px;font-size:14px">After which this personalised demo will no longer be available.</p>
+      </div>
+    </section>
+
+    <!-- FINAL CTA -->
+    <section class="section"><div class="shell final-cta"><p class="eyebrow" data-copy="ctaEyebrow">The next patient call starts here</p><h2>Let’s build one for <span id="cta-biz-name">your transport company</span>.</h2><p data-copy="ctaSupport">Designed around your routes and your patients.</p><a id="book-btn" class="button" href="https://api.leadconnectorhq.com/widget/bookings/aivoice-onboarding" data-copy="bookButton">Get My AI Receptionist</a></div></section>
+
+    <footer class="shell"><span id="footer-biz-name">Your Medical Transport</span><span>AI Voice Experience &middot; <strong style="color:var(--t);font-weight:600">Creative Copyz</strong></span></footer>
+  </main>
+
+  <script>
+    // ── Server-injected config takes priority over URL params ──
+    import('https://esm.sh/retell-client-js-sdk').then(function(m) { window.RetellWebClient = m.RetellWebClient; }).catch(function() {});
+(function () {
+      var params = window.DEMO_CONFIG ? (function () {
+  var _c = window.DEMO_CONFIG;
+  var p  = new URLSearchParams();
+  p.set('name',      _c.businessName   || '');
+  p.set('city',      _c.city           || '');
+  p.set('tagline',   _c.tagline        || '');
+  p.set('primary',   _c.primaryColor   || '');
+  p.set('secondary', _c.secondaryColor || '');
+  p.set('agent',     _c.agentId        || '');
+  p.set('created',   String(_c.created || ''));
+  p.set('focus',     _c.focus          || 'all');
+  return p;
+})() : new URLSearchParams(location.search);
+      function parseHex(hex) {
+        var value = String(hex || '').replace(/[^a-fA-F0-9]/g, '');
+        if (value.length === 3) value = value.split('').map(function (c) { return c + c; }).join('');
+        return /^[a-fA-F0-9]{6}$/.test(value) ? value.toUpperCase() : '0891B2';
+      }
+      function applyPalette(primary, secondary) {
+        var pHex = parseHex(primary), sHex = parseHex(secondary);
+        var toArray = function (hex) { return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)]; };
+        var p = toArray(pHex), s = toArray(sHex);
+        var mix = function (a, b, t) { return a.map(function (v, i) { return Math.round(v * (1 - t) + b[i] * t); }); };
+        var BLACK = [0, 0, 0], WHITE = [255, 255, 255];
+        var toRgb = function (c) { return 'rgb(' + c.join(',') + ')'; };
+        var toRgba = function (c, a) { return 'rgba(' + c.join(',') + ',' + a + ')'; };
+        var vars = {
+          '--p': '#' + pHex, '--s': '#' + sHex,
+          '--b0': toRgb(mix(s, BLACK, .45)), '--b1': '#' + sHex,
+          '--b2': toRgb(mix(s, WHITE, .06)), '--b3': toRgb(mix(s, WHITE, .12)),
+          '--gl': toRgba(p, .35), '--gs': toRgba(p, .12), '--bd': toRgba(p, .20),
+          '--t': '#F0F0F0', '--tm': 'rgba(240,240,240,.44)', '--td': 'rgba(240,240,240,.20)'
+        };
+        Object.keys(vars).forEach(function (key) { document.documentElement.style.setProperty(key, vars[key]); });
+      }
+      applyPalette(params.get('primary') || '0891B2', params.get('secondary') || '164E63');
+      function cleanText(value, fallback) { return value && value.trim() ? value.trim().slice(0, 120) : fallback; }
+      function setText(id, value) { var node = document.getElementById(id); if (node) node.textContent = value; }
+      var businessName = cleanText(params.get('name'), 'Your Medical Transport');
+      var city         = cleanText(params.get('city'), 'your area');
+      var focus        = cleanText(params.get('focus'), 'all').toLowerCase();
+      var tagline      = cleanText(params.get('tagline'), 'Reliable rides, on time, every time.');
+      var agentId      = cleanText(params.get('agent'), '');
+      var focusCopy = {
+        dialysis:    'dialysis and recurring medical transport',
+        appointment: 'medical appointment and clinic transport',
+        discharge:   'hospital discharge and post-care transport',
+        wheelchair:  'wheelchair and mobility-assisted transport',
+        all:         'non-emergency medical transportation'
+      }[focus] || 'non-emergency medical transportation';
+      document.getElementById('biz-name').innerHTML = businessName + '<span>.<\/span>';
+      setText('top-biz-name', businessName);
+      setText('footer-biz-name', businessName);
+      setText('biz-tagline', tagline);
+      setText('step-biz-name', businessName + '’s');
+      setText('cta-biz-name', businessName);
+      document.title = businessName + ' | AI Voice Experience';
+      document.querySelector('.hero-support').textContent = 'Every ' + focusCopy + ' call in ' + city + ' matters. The first provider to answer and confirm the ride keeps the patient for life.';
+      document.querySelector('.section-lead').textContent = 'Riley handles every call while your ' + city + ' drivers stay focused on safe, on-time transport.';
+      setText('widget-heading', businessName + ' books it fast.');
+      setText('widget-sub', 'Reliable ' + focusCopy + ' booking for ' + city + ' patients, available around the clock.');
+      document.querySelector('.voice-prompt').textContent = 'Ask about ' + focusCopy + ', availability, requirements, or booking a ride with ' + businessName + '.';
+      document.querySelector('.final-cta p:last-of-type').textContent = 'Built for ' + businessName + ' and the ' + focusCopy + ' calls you handle in ' + city + '.';
+
+      /* =========================================================
+         PROCEDURAL AI ORB
+         ========================================================= */
+      var orb = document.getElementById('ai-orb');
+      var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var particles = [];
+      var orbPointer = { active: false, x: 200, y: 200 };
+      var NS = 'http://www.w3.org/2000/svg';
+      function createOrb() {
+        var defs = document.createElementNS(NS, 'defs');
+        var filter = document.createElementNS(NS, 'filter'); filter.setAttribute('id', 'orb-soften'); filter.setAttribute('x', '-50%'); filter.setAttribute('y', '-50%'); filter.setAttribute('width', '200%'); filter.setAttribute('height', '200%');
+        var blur = document.createElementNS(NS, 'feGaussianBlur'); blur.setAttribute('stdDeviation', '1.2'); filter.appendChild(blur); defs.appendChild(filter); orb.appendChild(defs);
+        for (var latitude = 0; latitude <= 20; latitude++) {
+          var phi = -Math.PI / 2 + latitude * Math.PI / 20;
+          var pointsOnRing = Math.max(5, Math.round(23 * Math.cos(phi)));
+          for (var longitude = 0; longitude < pointsOnRing; longitude++) {
+            var circle = document.createElementNS(NS, 'circle');
+            circle.setAttribute('fill', 'var(--p)'); circle.setAttribute('filter', 'url(#orb-soften)');
+            orb.appendChild(circle);
+            particles.push({ node: circle, phi: phi, theta: longitude * Math.PI * 2 / pointsOnRing, phase: Math.random() * Math.PI * 2 });
+          }
+        }
+      }
+      function positionOrb(time) {
+        var state = document.getElementById('voice-stage').className;
+        var speaking = state.indexOf('speaking') > -1, listening = state.indexOf('listening') > -1;
+        var rotation = reducedMotion ? .45 : time * .00016;
+        var breathing = reducedMotion ? 1 : 1 + Math.sin(time * .0014) * (speaking ? .06 : listening ? .035 : .018);
+        particles.forEach(function (particle) {
+          var theta = particle.theta + rotation;
+          var x = Math.cos(particle.phi) * Math.sin(theta);
+          var y = Math.sin(particle.phi);
+          var z = Math.cos(particle.phi) * Math.cos(theta);
+          var tilt = 20 * Math.PI / 180;
+          var tiltedX = x * Math.cos(tilt) - y * Math.sin(tilt);
+          var tiltedY = x * Math.sin(tilt) + y * Math.cos(tilt);
+          var perspective = .72 + (z + 1) * .18;
+          var flicker = reducedMotion ? 0 : Math.sin(time * .0018 + particle.phase) * .06;
+          var cx = 200 + tiltedX * 164 * perspective * breathing;
+          var cy = 200 + tiltedY * 164 * perspective * breathing;
+          var particleRadius = 1 + (z + 1) * .95;
+          var particleOpacity = .22 + (z + 1) * .34 + flicker + (speaking ? .15 : listening ? .08 : 0);
+          if (orbPointer.active) {
+            var distanceX = cx - orbPointer.x, distanceY = cy - orbPointer.y;
+            var distance = Math.max(1, Math.sqrt(distanceX * distanceX + distanceY * distanceY));
+            var influence = Math.max(0, 1 - distance / 105);
+            cx += distanceX / distance * influence * 24;
+            cy += distanceY / distance * influence * 24;
+            particleRadius += influence * 2.15;
+            particleOpacity += influence * .28;
+          }
+          particle.node.setAttribute('cx', cx.toFixed(2));
+          particle.node.setAttribute('cy', cy.toFixed(2));
+          particle.node.setAttribute('r', particleRadius.toFixed(2));
+          particle.node.setAttribute('opacity', Math.min(1, Math.max(.12, particleOpacity)).toFixed(2));
+        });
+      }
+      function animateOrb(time) {
+        positionOrb(time);
+        if (!reducedMotion) requestAnimationFrame(animateOrb);
+      }
+      createOrb(); requestAnimationFrame(animateOrb);
+      document.getElementById('start-call-btn').addEventListener('pointermove', function (event) { if (reducedMotion) return; var r = this.getBoundingClientRect(); orbPointer.active = true; orbPointer.x = (event.clientX - r.left) / r.width * 400; orbPointer.y = (event.clientY - r.top) / r.height * 400; });
+      document.getElementById('start-call-btn').addEventListener('pointerleave', function () { orbPointer.active = false; });
+
+/* =========================================================
+   DEMO EXPIRY COUNTDOWN
+   ========================================================= */
+(function () {
+  if (!agentId) return;
+  var SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  var timerEl    = document.getElementById('demo-timer');
+  var createdParam = params.get('created');
+  var startTime;
+  if (createdParam) {
+    startTime = parseInt(createdParam, 10);
+  } else {
+    var key    = 'demo_start_' + agentId;
+    var stored = localStorage.getItem(key);
+    startTime  = stored ? parseInt(stored, 10) : Date.now();
+    if (!stored) localStorage.setItem(key, startTime);
+  }
+  function pad(n) { return n < 10 ? '0' + n : String(n); }
+  function tick(id, val) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var padded = pad(val);
+    if (el.textContent === padded) return;
+    el.classList.remove('tick');
+    void el.offsetWidth;
+    el.classList.add('tick');
+    el.textContent = padded;
+  }
+  function getRemaining() {
+    var r = SEVEN_DAYS - (Date.now() - startTime);
+    if (r <= 0) return null;
+    return { d: Math.floor(r / 86400000), h: Math.floor((r % 86400000) / 3600000), m: Math.floor((r % 3600000) / 60000), s: Math.floor((r % 60000) / 1000) };
+  }
+  function handleExpired() {
+    timerEl.className = 'demo-timer expired';
+    timerEl.innerHTML = '<span class="timer-dot"><\/span>Demo expired';
+    ['cd-days','cd-hours','cd-minutes','cd-seconds'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) { el.textContent = '00'; el.style.color = 'rgba(239,68,68,.65)'; }
+    });
+    var btn = document.getElementById('start-call-btn');
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.4'; btn.style.cursor = 'not-allowed'; }
+    document.getElementById('call-status').textContent = 'This demo has expired. Book a discovery call below.';
+    setTimeout(function () { document.getElementById('book-btn').scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' }); }, 800);
+  }
+  function update() {
+    var r = getRemaining();
+    if (!r) { handleExpired(); return; }
+    var topLabel;
+    if (r.d > 0)      topLabel = r.d + 'd ' + r.h + 'h ' + r.m + 'm remaining';
+    else if (r.h > 0) topLabel = r.h + 'h ' + r.m + 'm remaining';
+    else              topLabel = r.m + 'm ' + r.s + 's remaining';
+    timerEl.innerHTML = '<span class="timer-dot"><\/span>Expires in ' + topLabel;
+    tick('cd-days', r.d); tick('cd-hours', r.h); tick('cd-minutes', r.m); tick('cd-seconds', r.s);
+  }
+  update();
+  setInterval(update, 1000);
+}());
+
+      /* =========================================================
+         RETELL WEB CALL
+         ========================================================= */
+      var stage = document.getElementById('voice-stage'), status = document.getElementById('call-status'), callButton = document.getElementById('start-call-btn'), client = null, isCalling = false;
+      var callConnected = false;
+      // ── Call counter ──────────────────────────────────────────────────────────
+      var MAX_CALLS = window.DEMO_CONFIG ? (window.DEMO_CONFIG.maxCalls || 5) : 5;
+      var callsUsed = window.DEMO_CONFIG ? (window.DEMO_CONFIG.callsUsed || 0) : 0;
+
+      function updateCallCounter() {
+        var remaining = Math.max(0, MAX_CALLS - callsUsed);
+        var el = document.getElementById('calls-remaining');
+        var wrap = document.getElementById('call-counter');
+        if (!el || !wrap) return;
+        el.textContent = remaining;
+        if (remaining === 0) {
+          wrap.className = 'call-counter depleted';
+          wrap.innerHTML = '<span class="call-counter-dot"><\/span>No calls remaining';
+        }
+      }
+      updateCallCounter();
+
+      function setCallState(state, message) { stage.classList.remove('connecting', 'listening', 'speaking'); if (state) stage.classList.add(state); stage.classList.toggle('active', state === 'connecting' || state === 'listening' || state === 'speaking'); status.textContent = message; callButton.setAttribute('aria-label', isCalling ? 'End AI voice call' : 'Start an AI voice call'); }
+      function finishCall(message) {
+        isCalling = false;
+        setCallState('', message || 'Call ended.');
+        if (callConnected) { callsUsed++; updateCallCounter(); }
+        callConnected = false;
+        window.setTimeout(function () { document.getElementById('book-btn').scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' }); }, 700);
+      }
+      async function toggleCall() {
+        if (isCalling) { if (client && typeof client.stopCall === 'function') client.stopCall(); finishCall('Call ended.'); return; }
+        if (!agentId) { setCallState('', 'This voice experience is being configured.'); return; }
+        var waited = 0;
+        while (!window.RetellWebClient && waited < 8000) { await new Promise(function(r) { setTimeout(r, 100); }); waited += 100; }
+        if (!window.RetellWebClient) { setCallState('', 'Voice service is unavailable. Please try again shortly.'); return; }
+        isCalling = true; setCallState('connecting', 'Connecting you to Riley...');
+        try {
+          var response = await fetch('https://retell-proxy-production.up.railway.app/create-web-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId: agentId }) });
+          if (!response.ok) throw new Error('Call request failed');
+          var payload = await response.json();
+          if (payload.limitReached) {
+            isCalling = false;
+            callsUsed = MAX_CALLS;
+            updateCallCounter();
+            setCallState('', 'This demo has reached its 5-call limit. Book your discovery call below.');
+            setTimeout(function() { document.getElementById('book-btn').scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' }); }, 500);
+            return;
+          }
+          var accessToken = payload.accessToken || payload.access_token;
+          if (!accessToken) throw new Error('Missing access token');
+          client = new window.RetellWebClient();
+          client.on('call_started',        function () { callConnected = true; setCallState('listening', 'Listening...'); });
+          client.on('agent_start_talking',  function () { setCallState('speaking',  'Riley is speaking...'); });
+          client.on('agent_stop_talking',   function () { setCallState('listening', 'Listening...'); });
+          client.on('call_ended',           function () { finishCall('Call ended.'); });
+          client.on('error',                function () { finishCall('The call could not be completed.'); });
+          await client.startCall({ accessToken: accessToken });
+        } catch (error) { console.error('Call error:', error); finishCall('Unable to connect right now. Please try again.'); }
+      }
+      callButton.addEventListener('click', toggleCall);
+document.getElementById('end-call-btn').addEventListener('click', function () {
+  if (isCalling) { if (client && typeof client.stopCall === 'function') client.stopCall(); finishCall('Call ended.'); }
+});
+      document.getElementById('cta-hero-btn').addEventListener('click', function () { document.getElementById('start-call-btn').scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' }); window.setTimeout(function () { document.getElementById('start-call-btn').focus({ preventScroll: true }); }, 500); });
+    }());
+  </script>
+</body>
+</html>
