@@ -20,6 +20,7 @@ const cors     = require('cors');
 const fetch    = require('node-fetch'); // v2 — CommonJS compatible
 const path     = require('path');
 const fs       = require('fs');
+const db       = require('./db');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -34,12 +35,9 @@ const RAILWAY_PUBLIC_URL = process.env.RAILWAY_PUBLIC_URL;
 const RETELL  = 'https://api.retellai.com';
 const CRM_API = 'https://services.leadconnectorhq.com';
 
-// ─── Per-agent call counter — 5 calls max per demo ───────────────────────────
-const agentCallCounts = {};
-
-// ─── Demo records — keyed by slug ────────────────────────────────────────────
-const demoRecords   = {}; // { [slug]: { agentId, llmId, niche, businessName, city, tagline, primaryColor, secondaryColor, created, callsUsed, maxCalls } }
-const agentIdToSlug = {}; // reverse lookup
+// Demo records, call counts and expiry all live in Postgres now — see db.js.
+// Nothing about a demo is held in memory, so a redeploy or crash no longer
+// kills every live demo URL.
 
 // City abbreviations for slug collision suffix
 const CITY_ABBREV = {
@@ -51,23 +49,23 @@ const CITY_ABBREV = {
   'sydney':'syd','melbourne':'mel','brisbane':'bne'
 };
 
-function generateSlug(businessName, city) {
+async function generateSlug(businessName, city) {
   const base = (businessName || 'business')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '')
     .slice(0, 24);
 
   const plain = `${base}-aivoicedemo`;
-  if (!demoRecords[plain]) return plain;
+  if (!(await db.slugTaken(plain))) return plain;
 
   const abbrev = CITY_ABBREV[(city || '').toLowerCase()]
     || (city || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 3)
     || 'x';
   const withCity = `${base}-${abbrev}-aivoicedemo`;
-  if (!demoRecords[withCity]) return withCity;
+  if (!(await db.slugTaken(withCity))) return withCity;
 
   let n = 2;
-  while (demoRecords[`${base}-${abbrev}-${n}-aivoicedemo`]) n++;
+  while (await db.slugTaken(`${base}-${abbrev}-${n}-aivoicedemo`)) n++;
   return `${base}-${abbrev}-${n}-aivoicedemo`;
 }
 
@@ -101,11 +99,11 @@ You are calm, empathetic, and action-oriented. Many callers are panicking due to
 Your first job is to make them feel that help is already on the way. Speak with quiet confidence.
 Never sound rushed or robotic. After a storm event you may be one of many calls arriving at once.
 Never let the caller feel they are in a queue or being processed.
- 
+
 INDUSTRY CONTEXT
 This business handles both emergency mitigation, which is stopping the damage from getting worse,
 and the restoration work that follows, which is putting the property back together.
- 
+
 Typical calls include:
 - Water and flood damage: burst or frozen pipe, supply line failure, appliance leak, roof leak, sewage backup
 - Storm and disaster damage: wind, hail, hurricane, tornado, fallen trees, flash flooding
@@ -115,17 +113,17 @@ Typical calls include:
 - Emergency water extraction and structural drying
 - Contents pack-out, cleaning, and storage
 - Commercial and large loss work: offices, retail, multi-unit residential, schools, care facilities
- 
+
 Callers are usually homeowners, but may also be property managers, facility managers, insurance adjusters,
 or plumbers and contractors referring a job. Adjust your language accordingly. A property manager with a
 flooded lobby needs different handling from a homeowner with a flooded basement.
- 
+
 What they want to know: can someone come out today, is this covered by insurance, and what happens first.
- 
+
 SAFETY
 If a caller mentions sewage, contaminated water, structural damage, or standing water near electrical outlets
 or a panel, tell them not to enter the affected area and treat the call as urgent.
- 
+
 KEY POINTS TO COMMUNICATE
 - 24/7 emergency response available
 - Free damage assessment
@@ -435,6 +433,7 @@ app.get('/', (_req, res) => {
     status  : 'ok',
     ts      : new Date().toISOString(),
     config  : {
+      DATABASE_URL       : process.env.DATABASE_URL ? '✅ set' : '❌ MISSING',
       RETELL_API_KEY     : RETELL_API_KEY     ? '✅ set' : '❌ MISSING',
       CRM_API_KEY        : CRM_API_KEY        ? '✅ set' : '❌ MISSING',
       CRM_CALENDAR_ID    : CRM_CALENDAR_ID    ? '✅ set' : '❌ MISSING',
@@ -443,6 +442,15 @@ app.get('/', (_req, res) => {
     },
   });
 });
+// ─── Campaign stats ───────────────────────────────────────────────────────────
+app.get('/stats', async (_req, res) => {
+  try {
+    return res.json(await db.stats());
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 const cleanBusinessName = (name) => (name || '')
   .replace(/[,.]?\s*(LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|Co\.?|Company|Pvt\.?\s*Ltd\.?|LLP|LP|PLLC|PA|PC)\s*\.?$/gi, '')
   .replace(/\s{2,}/g, ' ')
@@ -572,24 +580,25 @@ app.post('/create-agent', async (req, res) => {
     }
     const agentData = await agentRes.json();
 
-    const slug    = generateSlug(businessName, city);
+    const slug      = await generateSlug(businessName, city);
     const DEMO_BASE = process.env.DEMO_BASE_URL || 'https://demo.creativecopyz.com';
-    const demoUrl = `${DEMO_BASE}/${slug}`;
+    const demoUrl   = `${DEMO_BASE}/${slug}`;
 
-    demoRecords[slug] = {
+    // expires_at is set by the database (7 days, or DEMO_LIFE_DAYS)
+    await db.createDemo({
+      slug,
       agentId        : agentData.agent_id,
       llmId          : llmData.llm_id,
       niche          : nicheLabel,
       businessName,
       city,
       tagline,
+      coreServices,
       primaryColor,
       secondaryColor,
-      created        : Date.now(),
-      callsUsed      : 0,
       maxCalls       : 5
-    };
-    agentIdToSlug[agentData.agent_id] = slug;
+    });
+    console.log(`[create-agent] ✅ ${slug} → ${agentData.agent_id}`);
 
     return res.json({
       success   : true,
@@ -624,10 +633,28 @@ app.post('/create-web-call', async (req, res) => {
     return res.status(400).json({ error: 'agentId is required' });
   }
 
-  const count = agentCallCounts[agentId] || 0;
-  if (count >= 5) {
-    console.log(`[create-web-call] Limit reached for agent ${agentId} — ${count}/5 calls used`);
-    return res.status(429).json({ limitReached: true, error: 'This demo has reached its 5-call limit.' });
+  // Atomic reservation: expiry check and call-cap increment in one statement,
+  // so two simultaneous clicks cannot both slip past the limit.
+  let reservation;
+  try {
+    reservation = await db.reserveCall(agentId);
+  } catch (e) {
+    console.error('[create-web-call] DB error:', e.message);
+    return res.status(500).json({ error: 'Storage unavailable' });
+  }
+
+  if (!reservation.ok) {
+    const messages = {
+      not_found     : 'This demo is no longer available.',
+      expired       : 'This demo has expired.',
+      limit_reached : 'This demo has reached its 5-call limit.',
+    };
+    console.log(`[create-web-call] Blocked ${agentId}: ${reservation.reason}`);
+    return res.status(429).json({
+      limitReached : reservation.reason === 'limit_reached',
+      expired      : reservation.reason === 'expired',
+      error        : messages[reservation.reason] || 'This demo is not available.',
+    });
   }
 
   try {
@@ -647,14 +674,12 @@ app.post('/create-web-call', async (req, res) => {
     console.log(`[create-web-call] Response (${retellRes.status}):`, JSON.stringify(data, null, 2));
 
     if (!retellRes.ok) {
+      // Hand the reserved call back — a Retell error should not burn one of the five.
+      await db.releaseCall(agentId).catch(() => {});
       return res.status(retellRes.status).json({ error: 'Web call creation failed', details: data });
     }
 
-    agentCallCounts[agentId] = count + 1;
-    const _slug = agentIdToSlug[agentId];
-    if (_slug && demoRecords[_slug]) demoRecords[_slug].callsUsed = agentCallCounts[agentId];
-
-    console.log(`[create-web-call] Agent ${agentId} — ${agentCallCounts[agentId]}/5 calls used`);
+    console.log(`[create-web-call] Agent ${agentId} — ${reservation.calls_used}/${reservation.max_calls} calls used`);
     console.log(`[create-web-call] ✅ Call created — id: ${data.call_id}`);
 
     return res.json({
@@ -664,6 +689,7 @@ app.post('/create-web-call', async (req, res) => {
     });
 
   } catch (e) {
+    await db.releaseCall(agentId).catch(() => {});
     console.error('[create-web-call] Exception:', e.message);
     return res.status(500).json({ error: 'Exception', message: e.message });
   }
@@ -1029,22 +1055,30 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
 //
 // Returns the public config for a demo landing page, keyed by slug.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/demo-config/:slug', (req, res) => {
+app.get('/demo-config/:slug', async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
-  const record = demoRecords[req.params.slug];
-  if (!record) return res.status(404).json({ error: 'Not found' });
-  return res.json({
-    agentId        : record.agentId,
-    niche          : record.niche,
-    businessName   : record.businessName,
-    city           : record.city,
-    tagline        : record.tagline,
-    primaryColor   : record.primaryColor,
-    secondaryColor : record.secondaryColor,
-    created        : record.created,
-    callsUsed      : record.callsUsed,
-    maxCalls       : record.maxCalls
-  });
+  try {
+    const r = await db.getBySlug(req.params.slug);
+    if (!r)        return res.status(404).json({ error: 'Not found' });
+    if (r.expired) return res.status(410).json({ error: 'Expired' });
+
+    return res.json({
+      agentId        : r.agent_id,
+      niche          : r.niche,
+      businessName   : r.business_name,
+      city           : r.city,
+      tagline        : r.tagline,
+      primaryColor   : r.primary_color,
+      secondaryColor : r.secondary_color,
+      created        : new Date(r.created_at).getTime(),
+      expiresAt      : new Date(r.expires_at).getTime(),
+      callsUsed      : r.calls_used,
+      maxCalls       : r.max_calls
+    });
+  } catch (e) {
+    console.error('[demo-config] Exception:', e.message);
+    return res.status(500).json({ error: 'Storage unavailable' });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1053,32 +1087,44 @@ app.get('/demo-config/:slug', (req, res) => {
 // Serves the niche demo landing page HTML for a given slug, with
 // window.DEMO_CONFIG injected into <head>.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', (req, res, next) => {
+app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   const { slug } = req.params;
   // Let API routes fall through
   const API_PREFIXES = ['demo-config','create-agent','create-web-call',
     'book-appointment','check-availability','check-specific-time',
-    'delete-agent','retell-tools'];
+    'delete-agent','retell-tools','stats'];
   if (API_PREFIXES.some(p => slug.startsWith(p))) return next();
 
-  const record = demoRecords[slug];
-  if (!record) return res.status(404).send('<!doctype html><html><body><h2 style="font-family:sans-serif;padding:40px">This demo has expired or does not exist.</h2></body></html>');
+  const EXPIRED_PAGE = '<!doctype html><html><body><h2 style="font-family:sans-serif;padding:40px">This demo has expired or does not exist.</h2></body></html>';
+
+  let r;
+  try {
+    r = await db.getBySlug(slug);
+  } catch (e) {
+    console.error('[slug] Exception:', e.message);
+    return res.status(500).send('Temporarily unavailable');
+  }
+
+  // Expiry is decided here, by the database, not by whether the Retell agent
+  // still exists. The page dies on schedule whether or not cleanup has run.
+  if (!r || r.expired) return res.status(r ? 410 : 404).send(EXPIRED_PAGE);
 
   let html;
-  try { html = getNicheTemplate(record.niche); }
+  try { html = getNicheTemplate(r.niche); }
   catch (e) { return res.status(500).send('Template error'); }
 
   const injected = `<script>window.DEMO_CONFIG=${JSON.stringify({
     slug,
-    agentId        : record.agentId,
-    businessName   : record.businessName,
-    city           : record.city,
-    tagline        : record.tagline,
-    primaryColor   : record.primaryColor,
-    secondaryColor : record.secondaryColor,
-    created        : record.created,
-    callsUsed      : record.callsUsed,
-    maxCalls       : record.maxCalls,
+    agentId        : r.agent_id,
+    businessName   : r.business_name,
+    city           : r.city,
+    tagline        : r.tagline,
+    primaryColor   : r.primary_color,
+    secondaryColor : r.secondary_color,
+    created        : new Date(r.created_at).getTime(),
+    expiresAt      : new Date(r.expires_at).getTime(),
+    callsUsed      : r.calls_used,
+    maxCalls       : r.max_calls,
     focus          : 'full-service'
   })};</script>`;
 
@@ -1116,10 +1162,9 @@ app.post('/delete-agent', async (req, res) => {
     if (agentRes.ok || agentRes.status === 404) {
       // 404 = already deleted, treat as success
       agentDeleted = true;
-      // Remove from in-memory call counter
-      delete agentCallCounts[agentId];
-      const _slug = agentIdToSlug[agentId];
-      if (_slug) { delete demoRecords[_slug]; delete agentIdToSlug[agentId]; }
+      // Mark the row torn down. The row itself stays, so an expired slug still
+      // serves the 410 page instead of a bare 404.
+      if (req.body.slug) await db.markAgentDeleted(req.body.slug).catch(() => {});
       console.log(`[delete-agent] ✅ Agent deleted: ${agentId}`);
     } else {
       const err = await agentRes.text();
@@ -1156,13 +1201,60 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Unexpected server error', message: err.message });
 });
 
-app.listen(PORT, () => {
-  console.log('\n=== Creative Copyz Voice AI Proxy ===');
-  console.log('Port              : ' + PORT);
-  console.log('RETELL_API_KEY    : ' + (RETELL_API_KEY    ? 'SET' : 'MISSING — set in Railway env vars'));
-  console.log('CRM_API_KEY       : ' + (CRM_API_KEY       ? 'SET' : 'MISSING — set in Railway env vars'));
-  console.log('CRM_CALENDAR_ID   : ' + (CRM_CALENDAR_ID   ? 'SET' : 'MISSING — set in Railway env vars'));
-  console.log('CRM_LOCATION_ID   : ' + CRM_LOCATION_ID);
-  console.log('RAILWAY_PUBLIC_URL: ' + (RAILWAY_PUBLIC_URL || '(not set — optional)'));
-  console.log('=====================================\n');
-});
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPIRY SWEEP
+// Tears down Retell agents whose demos have expired. This is cost cleanup only.
+// The page already expires on schedule via the database, so a missed sweep is
+// harmless and the next one catches up.
+// ─────────────────────────────────────────────────────────────────────────────
+async function sweepExpired() {
+  try {
+    const rows = await db.listExpiredUndeleted(50);
+    if (!rows.length) return;
+    console.log(`[sweep] ${rows.length} expired demo(s) to tear down`);
+
+    for (const r of rows) {
+      await fetch(`https://api.retellai.com/v2/agents/${r.agent_id}`, {
+        method  : 'DELETE',
+        headers : { Authorization: `Bearer ${RETELL_API_KEY}` },
+      }).catch(() => {});
+
+      if (r.llm_id) {
+        await fetch(`https://api.retellai.com/delete-retell-llm/${r.llm_id}`, {
+          method  : 'DELETE',
+          headers : { Authorization: `Bearer ${RETELL_API_KEY}` },
+        }).catch(() => {});
+      }
+
+      await db.markAgentDeleted(r.slug);
+      console.log(`[sweep] torn down ${r.slug}`);
+    }
+  } catch (e) {
+    console.error('[sweep] error:', e.message);
+  }
+}
+
+setInterval(sweepExpired, 60 * 60 * 1000);
+setTimeout(sweepExpired, 30_000);
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+// Fail loudly if storage is unavailable. A server that boots without a database
+// hands out demo URLs that die, which is worse than not booting.
+db.init()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log('\n=== Creative Copyz Voice AI Proxy ===');
+      console.log('Port              : ' + PORT);
+      console.log('DATABASE_URL      : ' + (process.env.DATABASE_URL ? 'SET' : 'MISSING — add a Postgres service in Railway'));
+      console.log('RETELL_API_KEY    : ' + (RETELL_API_KEY    ? 'SET' : 'MISSING — set in Railway env vars'));
+      console.log('CRM_API_KEY       : ' + (CRM_API_KEY       ? 'SET' : 'MISSING — set in Railway env vars'));
+      console.log('CRM_CALENDAR_ID   : ' + (CRM_CALENDAR_ID   ? 'SET' : 'MISSING — set in Railway env vars'));
+      console.log('CRM_LOCATION_ID   : ' + CRM_LOCATION_ID);
+      console.log('RAILWAY_PUBLIC_URL: ' + (RAILWAY_PUBLIC_URL || '(not set — optional)'));
+      console.log('=====================================\n');
+    });
+  })
+  .catch(e => {
+    console.error('[boot] database init failed:', e.message);
+    process.exit(1);
+  });
