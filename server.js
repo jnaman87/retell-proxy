@@ -420,7 +420,10 @@ app.get('/', (_req, res) => {
     },
   });
 });
-
+const cleanBusinessName = (name) => (name || '')
+  .replace(/[,.]?\s*(LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|Co\.?|Company|Pvt\.?\s*Ltd\.?|LLP|LP|PLLC|PA|PC)\s*\.?$/gi, '')
+  .replace(/\s{2,}/g, ' ')
+  .trim();
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-agent
 //
@@ -436,14 +439,16 @@ app.get('/', (_req, res) => {
 app.post('/create-agent', async (req, res) => {
   try {
     const {
-  niche         = 'restoration',
-  businessName  = 'Your Business',
-  city          = 'your area',
-  coreServices  = '',
-  tagline       = '',
-  primaryColor  = '',
-  secondaryColor= ''
-} = req.body;
+      niche          = 'restoration',
+      businessName: rawName = 'Your Business',
+      city           = 'your area',
+      coreServices   = '',
+      tagline        = '',
+      primaryColor   = '',
+      secondaryColor = ''
+    } = req.body;
+
+    const businessName = cleanBusinessName(rawName);
 
     const systemPrompt     = buildSystemPrompt({ niche, businessName, city, coreServices, tagline });
     const nicheLabel       = normalizeNiche(niche);
