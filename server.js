@@ -1239,15 +1239,30 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/delete-agent', async (req, res) => {
   const b = req.body || {};
-  let agentId = b.agentId || b.agent_id;
-  let llmId   = b.llmId   || b.llm_id;
-  const slug  = b.slug;
 
-  // Delete by slug alone — Postgres already holds both IDs.
-  if (!agentId && slug) {
+  // GHL posts the whole contact record, so the agent id arrives under a custom
+  // field name rather than agentId. Check every place it can turn up.
+  let agentId = b.agentId
+             || b.agent_id
+             || b['Voice AI Agent ID']
+             || (b.customData && b.customData.voiceagent);
+
+  let llmId = b.llmId || b.llm_id;
+
+  // Recover the slug from the demo URL if it was not sent directly.
+  let slug = b.slug;
+  const demoUrl = b['Demo Page URL'] || b.demoUrl;
+  if (!slug && demoUrl) {
+    const m = String(demoUrl).match(/\/([a-z0-9][a-z0-9-]{2,59})\/?$/i);
+    if (m) slug = m[1];
+  }
+
+  // Always prefer the database row. It holds the llm id, which GHL never sends,
+  // so without this lookup the LLM is orphaned every time.
+  if (slug) {
     try {
       const r = await db.getBySlug(slug);
-      if (r) { agentId = r.agent_id; llmId = llmId || r.llm_id; }
+      if (r) { agentId = agentId || r.agent_id; llmId = llmId || r.llm_id; }
     } catch (e) { console.error('[delete-agent] lookup failed:', e.message); }
   }
 
@@ -1275,7 +1290,7 @@ app.post('/delete-agent', async (req, res) => {
       agentDeleted = true;
       // Mark the row torn down. The row itself stays, so an expired slug still
       // serves the 410 page instead of a bare 404.
-      if (slug) await db.markAgentDeleted(req.body.slug).catch(() => {});
+      if (slug) await db.markAgentDeleted(slug).catch(() => {});
       console.log(`[delete-agent] ✅ Agent deleted: ${agentId}`);
     } else {
       const err = await agentRes.text();
