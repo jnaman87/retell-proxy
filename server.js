@@ -316,17 +316,17 @@ KEY POINTS TO COMMUNICATE
 
 function normalizeNiche(niche) {
   const n = (niche || '').toLowerCase();
-  if (n.includes('restoration') || n.includes('flood') || n.includes('water damage') || n.includes('fire damage') || n.includes('mold')) return 'restoration';
-  if (n.includes('bail'))                                                                      return 'bailbond';
-  if (n.includes('tow'))                                                                       return 'towing';
-  if (n.includes('locksmith') || n.includes('lockout') || n.includes('lock'))                 return 'locksmith';
-  if (n.includes('vet') || n.includes('animal') || n.includes('pet'))                         return 'vet';
-  if (n.includes('funeral') || n.includes('mortuary') || n.includes('cremation'))             return 'funeral';
-  if (n.includes('septic') || n.includes('sewage') || n.includes('drain'))                    return 'septic';
-  if (n.includes('nemt') || n.includes('medical transport') || n.includes('non-emergency'))   return 'nemt';
-  if (n.includes('security') || n.includes('guard'))                                          return 'security';
-  if (n.includes('roadside') || n.includes('breakdown') || n.includes('battery'))             return 'roadside';
-  return 'restoration'; // fallback
+  if (n.includes('restoration') || n.includes('disaster mitigation') || n.includes('flood') || n.includes('water damage') || n.includes('fire damage') || n.includes('mold')) return 'restoration';
+  if (n.includes('bail'))                                                                                    return 'bailbond';
+  if (n.includes('tow'))                                                                                     return 'towing';
+  if (n.includes('locksmith') || n.includes('lockout') || n.includes('lock'))                               return 'locksmith';
+  if (n.includes('vet') || n.includes('animal') || n.includes('animal hospital') || n.includes('pet'))      return 'vet';
+  if (n.includes('funeral') || n.includes('mortuary') || n.includes('cremation'))                           return 'funeral';
+  if (n.includes('septic') || n.includes('sewage') || n.includes('drain'))                                  return 'septic';
+  if (n.includes('nemt') || n.includes('medical transport') || n.includes('non-emergency'))                 return 'nemt';
+  if (n.includes('security') || n.includes('guard'))                                                        return 'security';
+  if (n.includes('roadside') || n.includes('breakdown') || n.includes('battery'))                           return 'roadside';
+  return 'restoration';
 }
 
 // ============================================================
@@ -334,7 +334,7 @@ function normalizeNiche(niche) {
 // Combines niche template with business-specific details.
 // ============================================================
 
-function buildSystemPrompt({ niche, businessName, city, coreServices, tagline }) {
+function buildSystemPrompt({ niche, businessName, city, coreServices, tagline, callerFaqs }) {
   const key      = normalizeNiche(niche);
   const template = NICHE_TEMPLATES[key] || NICHE_TEMPLATES.restoration;
   const today    = new Date().toLocaleDateString('en-US', {
@@ -359,6 +359,7 @@ book their services, or make any real commitments on their behalf.
 Your name is Emma. You speak as if you are the receptionist for ${businessName} in ${city}.
 ${tagline      ? `Their tagline: "${tagline}"`           : ''}
 ${coreServices ? `Their core services: ${coreServices}` : ''}
+${callerFaqs ? `Their callers most commonly ask: ${callerFaqs}` : ''}
 
 ## OPENING LINE
 When the call connects, say exactly:
@@ -519,13 +520,14 @@ app.post('/create-agent', async (req, res) => {
       city           = 'your area',
       coreServices   = '',
       tagline        = '',
+      callerFaqs = '',
       primaryColor   = '',
       secondaryColor = ''
     } = req.body;
 
     const businessName = cleanBusinessName(rawName);
 
-    const systemPrompt     = buildSystemPrompt({ niche, businessName, city, coreServices, tagline });
+    const systemPrompt     = buildSystemPrompt({ niche, businessName, city, coreServices, tagline, callerFaqs });
     const nicheLabel       = normalizeNiche(niche);
     const agentDisplayName = `[${nicheLabel}] ${businessName} - ${city}`;
 
@@ -1099,6 +1101,18 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
 //
 // Returns the public config for a demo landing page, keyed by slug.
 // ─────────────────────────────────────────────────────────────────────────────
+const NICHE_DEFAULT_TAGLINES = {
+  restoration : 'Emergency response for water, fire, and storm damage — 24/7.',
+  bailbond    : 'Fast, confidential bail bond service — day or night.',
+  towing      : 'Fast towing and roadside help, whenever you need it.',
+  locksmith   : 'Locked out? We are on the way.',
+  vet         : '24-hour emergency care for your pet.',
+  funeral     : 'Compassionate care for your family, around the clock.',
+  septic      : '24/7 emergency septic and drain service.',
+  nemt        : 'Reliable, on-time medical transportation.',
+  security    : 'Professional security coverage for your site.',
+  roadside    : 'Stranded? Help is on the way.'
+};
 app.get('/demo-config/:slug', async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   try {
@@ -1111,7 +1125,7 @@ app.get('/demo-config/:slug', async (req, res) => {
       niche          : r.niche,
       businessName   : r.business_name,
       city           : r.city,
-      tagline        : r.tagline,
+      tagline : r.tagline || NICHE_DEFAULT_TAGLINES[r.niche] || 'AI-powered voice reception, built for your business.',
       primaryColor   : r.primary_color,
       secondaryColor : r.secondary_color,
       created        : new Date(r.created_at).getTime(),
@@ -1162,7 +1176,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
     agentId        : r.agent_id,
     businessName   : r.business_name,
     city           : r.city,
-    tagline        : r.tagline,
+    tagline : r.tagline || NICHE_DEFAULT_TAGLINES[r.niche] || 'AI-powered voice reception, built for your business.',
     primaryColor   : r.primary_color,
     secondaryColor : r.secondary_color,
     created        : new Date(r.created_at).getTime(),
