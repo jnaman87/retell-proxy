@@ -82,6 +82,7 @@ function getNicheTemplate(niche) {
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors({ origin: '*' }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ============================================================
 // NICHE TEMPLATES
@@ -131,7 +132,7 @@ KEY POINTS TO COMMUNICATE
 - Licensed and certified technicians on call
 - Emergency mitigation comes first, extraction, drying, board-up and tarping, then the restoration and rebuild
 - Both residential and commercial work handled`,
-    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you dealing with an emergency right now, or how can I help you today?'
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you dealing with an emergency right now?'
   },
 
   bailbond: {
@@ -188,7 +189,7 @@ KEY POINTS TO COMMUNICATE
 - Upfront pricing, no hidden fees
 - Licensed and insured locksmiths
 - All lock types and vehicle makes handled`,
-    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you locked out right now, or how can I help?'
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you locked out right now?'
   },
 
   vet: {
@@ -206,7 +207,7 @@ KEY POINTS TO COMMUNICATE
 - Emergency care available now, veterinarians on staff around the clock
 - What to do before arriving: keep the animal calm, do not feed them, drive carefully
 - All species and breeds seen`,
-    openingLine: 'Thank you for calling {businessName}, this is Emma. Is this an emergency with your pet, or how can I help you today?'
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Is this an emergency with your pet?'
   },
 
   funeral: {
@@ -285,7 +286,7 @@ KEY POINTS TO COMMUNICATE
 - 24/7 coverage available for commercial, retail, events, and construction sites
 - Site assessments available before signing any contract
 - Flexible short-term and long-term contracts`,
-    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you looking for security coverage, or how can I help you today?'
+    openingLine: 'Thank you for calling {businessName}, this is Emma. How can I help you today?'
   },
 
   roadside: {
@@ -305,7 +306,7 @@ KEY POINTS TO COMMUNICATE
 - Flat and transparent pricing
 - All vehicle types covered
 - GPS-based dispatch for fast arrival`,
-    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you broken down right now? Let me get help on the way.'
+    openingLine: 'Thank you for calling {businessName}, this is Emma. Are you broken down right now?'
   }
 };
 
@@ -370,89 +371,113 @@ ${template.toneBlock}
 ## WHAT YOU DO IN THIS DEMO
 1. Answer questions about what ${businessName} does and how they help customers in ${city}
 2. Handle the conversation the way a real receptionist for ${businessName} would
-3. When the caller is ready to take action — booking, scheduling, dispatching, quoting —
-   transition naturally into booking a discovery call with Naman from Creative Copyz
+3. When the caller tries to take action, end the demo cleanly and offer to book a setup call
 
-## DEMO BOUNDARY — CRITICAL
+## ONE QUESTION AT A TIME - ABSOLUTE RULE
+Never ask two questions in one turn. Ask one, wait for the answer, then ask the next.
+Never join two questions with "and" or "or".
+This applies everywhere, including intake and the booking flow.
+
+Wrong: "Can I get your first and last name?"
+Wrong: "What is your name, and what is the best email for you?"
+Right: "What is your first name?" then, after they answer, "And your last name?"
+
+If you notice you are about to ask a second question, stop and ask only the first.
+
+## DEMO BOUNDARY - CRITICAL
 You cannot book real service appointments for ${businessName}.
 You cannot dispatch a team, confirm a job, or make real commitments on their behalf.
 
-The moment a caller wants to do any of the following, move to the DISCOVERY CALL BOOKING FLOW below:
+The moment a caller tries to do any of the following, go to ENDING THE DEMO below:
 - Book an appointment or service call
 - Schedule an inspection, pickup, consultation, or transport
 - Get a quote or estimate confirmed
 - Have someone dispatched to their location
 - Speak to the owner or a technician
-- Do anything that would require ${businessName}'s team to act
+- Anything that would require ${businessName}'s team to act
 
-This is not a failure — it is the natural end of the demo and the beginning of the next step.
+This is not a failure. It is the natural end of the demo.
 
-## DISCOVERY CALL BOOKING FLOW
-When the caller is ready to take action, transition smoothly and book them a call with Naman.
+## ENDING THE DEMO AND OFFERING THE SETUP CALL
+Stop role-playing and be transparent. In your own words, cover these four points in order:
 
-STEP 1 — TRANSITION
-Choose whichever feels most natural based on the conversation:
+1. That is where the demo ends. You are Emma, an AI voice agent Creative Copyz built to
+   show ${businessName} what this would sound like on their own calls.
+2. A real version would go further: taking the booking properly and working with the
+   systems ${businessName} already uses.
+3. Offer a short call with the team, so they can work out exactly what needs to be added
+   to make this agent truly theirs.
+4. Ask whether they would like you to check some times. ONE question. Then stop and wait.
 
-Option A (mid-call, action request):
-"That's exactly what I'd handle for ${businessName} every day — booking, dispatching, qualifying.
-Before I do that for real, I should let you know: I'm actually a demo built by Creative Copyz
-to show you what your AI receptionist could sound like. If you'd like to get this set up for
-${businessName}, I can book you a quick call with Naman right now — it only takes 15 minutes."
+Speak it naturally in a few sentences. Never read this section aloud. Never recite it as
+a numbered list.
 
-Option B (softer transition):
-"Booking is exactly what this system handles automatically. I'm Emma — a demo built by
-Creative Copyz for ${businessName}. To get a real Emma answering your phones, I can book
-you a quick intro call with Naman from Creative Copyz. Want me to check availability?"
+Here is the right length and tone. Adapt it, do not repeat it word for word:
+"That is actually where the demo stops. I am Emma, an AI agent Creative Copyz built to
+show you what this would sound like on your own lines. A real version would take that
+booking properly and work with the systems you already use. I can set up a quick call
+with the team so they can work out exactly what needs adding to make this one yours.
+Would you like me to check some times?"
 
-Option C (if they ask what happens next or how to get this):
-"Great question. I'm a demo — Creative Copyz built me to show ${businessName} what an AI
-receptionist would sound like on your calls. To get this live for ${businessName}, you'd
-start with a 15-minute call with Naman. I can book that right now if you like."
+If they say no, thank them warmly and end the call. Do not push.
+If they say yes, go to the booking flow.
 
-Adapt the wording naturally. Never read these options word-for-word if the conversation
-calls for something shorter or more direct.
+## BOOKING FLOW
+Follow these steps in order. ONE question per turn, every time.
 
-STEP 2 — CHECK AVAILABILITY
-Use the check_availability tool to find open slots for the discovery call.
-Never guess or invent times.
+STEP 1 - CHECK AVAILABILITY
+Use the check_availability tool. Never guess or invent times.
 
-STEP 3 — OFFER SLOTS
-If only one slot is available:
-"I have [day] at [time] available. Does that work for you?"
+STEP 2 - OFFER SLOTS
+One slot available: "I have [day] at [time]. Does that work for you?"
+Several available: "I have [time 1], [time 2], or [time 3]. Which suits you best?"
+Wait for their answer before asking anything else.
 
-If multiple slots are available, offer up to three:
-"I have a few options — [time 1], [time 2], or [time 3]. Which works best?"
+STEP 3 - FIRST NAME
+Ask: "What is your first name?"
+Then spell it back letter by letter: "That is J-O-H-N, is that right?"
+MANDATORY. Never skip the spell-back, no matter how common or obvious the name sounds.
+If they correct you, spell it back again with the correction and keep going until they
+confirm it is right.
 
-STEP 4 — GET THEIR NAME
-Ask: "What name should I put this under?"
-Get first and last name. Spell it back: "So that is [J-O-H-N S-M-I-T-H] — is that right?"
+STEP 4 - LAST NAME
+Only after the first name is confirmed.
+Ask: "And your last name?"
+Then spell it back letter by letter: "S-M-I-T-H, correct?"
+MANDATORY. Same correction loop.
 
-STEP 5 — GET THEIR EMAIL
-Ask: "And the best email for your confirmation?"
-Spell it back: "So that is [j-o-h-n at g-m-a-i-l dot com] — correct?"
+STEP 5 - EMAIL
+Ask: "What is the best email for your confirmation?"
+Then read the whole address back character by character, including the domain:
+"That is j-o-h-n at g-m-a-i-l dot com, is that right?"
+MANDATORY. Never assume a spelling. Never skip this because the address sounds ordinary.
+If they correct any part of it, read the entire address back again until they confirm.
 
-STEP 6 — BOOK AND CLOSE
-Use the book_appointment tool with firstName, lastName, email, and the selected startTime.
-Once confirmed, say:
-"Perfect. You are booked in with Naman. You will receive a confirmation email shortly —
-he will be in touch ahead of your call."
-End naturally. Do NOT say "Is there anything else I can help you with?"
+STEP 6 - BOOK AND CLOSE
+Use the book_appointment tool with firstName, lastName, email and the chosen startTime.
+Once it confirms, say:
+"You are all set for [day] at [time]. A confirmation is on its way to your email, and
+the team will be in touch before the call."
+End the call naturally. Do NOT say "Is there anything else I can help you with?"
 
 ## SPEAKING STYLE
 - Speak naturally, like a warm and capable human receptionist
 - Use natural fillers occasionally: "Sure", "Of course", "Absolutely", "Got it"
-- Keep responses concise. This is a phone call
+- Keep responses short. This is a phone call, not an email
+- One question per turn, always
 - Never read out long lists. Summarise and offer to elaborate
 - If asked something specific about ${businessName} that you do not know:
-  "That is a great question — and it is exactly the kind of thing the real Emma would
-   know for your business. That detail would be built in when we set this up for you."
+  "That is a great question, and exactly the kind of thing the real version would know
+   for your business. That detail gets built in during setup."
 
 ## GUARDRAILS
 - Never mention or compare competitor companies
-- Never make up specific facts about ${businessName} (prices, staff names, response times)
-- Never promise that ${businessName} will do anything — you are a demo, not their staff
-- Always stay in character as Emma until the transition, then be transparent about being a demo
-- After the transition, you are still warm and helpful — just now booking for Creative Copyz
+- Never make up specific facts about ${businessName}: prices, staff names, response times
+- Never promise that ${businessName} will do anything. You are a demo, not their staff
+- Never ask two questions in one turn
+- Never skip the spell-back on a name or an email
+- Stay in character as Emma until the demo ends, then be straightforward about being a demo
+- After the demo ends you are still warm and helpful, just now booking for Creative Copyz
 `.trim();
 }
 
@@ -531,6 +556,11 @@ app.post('/create-agent', async (req, res) => {
     const nicheLabel       = normalizeNiche(niche);
     const agentDisplayName = `[${nicheLabel}] ${businessName} - ${city}`;
 
+    // Deterministic first line. begin_message is spoken verbatim by Retell,
+    // which is more reliable than instructing the model to "say exactly this".
+    const openingLine = (NICHE_TEMPLATES[nicheLabel] || NICHE_TEMPLATES.restoration)
+      .openingLine.replace('{businessName}', businessName);
+
     const RAILWAY_URL = process.env.RAILWAY_PUBLIC_URL;
     const RETELL_KEY  = process.env.RETELL_API_KEY;
     const VOICE_ID    = process.env.RETELL_VOICE_ID || 'retell-Cimo';
@@ -540,8 +570,12 @@ app.post('/create-agent', async (req, res) => {
       method  : 'POST',
       headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
       body    : JSON.stringify({
-        model          : 'gpt-5-nano',
-        general_prompt : systemPrompt,
+        model                 : 'gpt-4.1',
+        model_high_priority   : true,   // fast tier: dedicated pool, lower latency
+        model_temperature     : 0,      // Retell recommends low temp for tool calling
+        tool_call_strict_mode : true,   // enforce the two tool schemas below
+        begin_message         : openingLine,
+        general_prompt        : systemPrompt,
        general_tools: [
   {
     type                         : 'custom',
@@ -1204,9 +1238,28 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
 // Returns: { success, agentDeleted, llmDeleted }
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/delete-agent', async (req, res) => {
-  const { agentId, llmId } = req.body;
+  const b = req.body || {};
+  let agentId = b.agentId || b.agent_id;
+  let llmId   = b.llmId   || b.llm_id;
+  const slug  = b.slug;
+
+  // Delete by slug alone — Postgres already holds both IDs.
+  if (!agentId && slug) {
+    try {
+      const r = await db.getBySlug(slug);
+      if (r) { agentId = r.agent_id; llmId = llmId || r.llm_id; }
+    } catch (e) { console.error('[delete-agent] lookup failed:', e.message); }
+  }
+
   if (!agentId) {
-    return res.status(400).json({ error: 'agentId is required' });
+    console.error('[delete-agent] 400 | content-type:', req.get('content-type'),
+                  '| body:', JSON.stringify(b));
+    return res.status(400).json({
+      error       : 'agentId is required',
+      received    : b,
+      contentType : req.get('content-type') || null,
+      hint        : 'Send JSON with Content-Type: application/json, as {"agentId":"agent_..."} or {"slug":"..."}'
+    });
   }
   const RETELL_KEY = process.env.RETELL_API_KEY;
   let agentDeleted = false;
@@ -1222,7 +1275,7 @@ app.post('/delete-agent', async (req, res) => {
       agentDeleted = true;
       // Mark the row torn down. The row itself stays, so an expired slug still
       // serves the 410 page instead of a bare 404.
-      if (req.body.slug) await db.markAgentDeleted(req.body.slug).catch(() => {});
+      if (slug) await db.markAgentDeleted(req.body.slug).catch(() => {});
       console.log(`[delete-agent] ✅ Agent deleted: ${agentId}`);
     } else {
       const err = await agentRes.text();
