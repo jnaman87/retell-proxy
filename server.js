@@ -1281,12 +1281,16 @@ app.post('/delete-agent', async (req, res) => {
   let llmDeleted   = false;
   try {
     // ── Delete Retell Agent ──────────────────────────────────────────────
-    const agentRes = await fetch(`https://api.retellai.com/v2/agents/${agentId}`, {
+    // Correct endpoint is /delete-agent/{id}. /v2/agents/{id} returns 404,
+    // which the old code silently counted as a successful delete.
+    const agentRes = await fetch(`${RETELL}/delete-agent/${agentId}`, {
       method  : 'DELETE',
       headers : { 'Authorization': `Bearer ${RETELL_KEY}` },
     });
+    if (agentRes.status === 404) {
+      console.warn(`[delete-agent] 404 for ${agentId} — already deleted, or the id is wrong`);
+    }
     if (agentRes.ok || agentRes.status === 404) {
-      // 404 = already deleted, treat as success
       agentDeleted = true;
       // Mark the row torn down. The row itself stays, so an expired slug still
       // serves the 410 page instead of a bare 404.
@@ -1298,7 +1302,7 @@ app.post('/delete-agent', async (req, res) => {
     }
     // ── Delete Retell LLM (if provided) ────────────────────────────────────
     if (llmId) {
-      const llmRes = await fetch(`https://api.retellai.com/delete-retell-llm/${llmId}`, {
+      const llmRes = await fetch(`${RETELL}/delete-retell-llm/${llmId}`, {
         method  : 'DELETE',
         headers : { 'Authorization': `Bearer ${RETELL_KEY}` },
       });
@@ -1340,16 +1344,24 @@ async function sweepExpired() {
     console.log(`[sweep] ${rows.length} expired demo(s) to tear down`);
 
     for (const r of rows) {
-      await fetch(`https://api.retellai.com/v2/agents/${r.agent_id}`, {
+      const aRes = await fetch(`${RETELL}/delete-agent/${r.agent_id}`, {
         method  : 'DELETE',
         headers : { Authorization: `Bearer ${RETELL_API_KEY}` },
-      }).catch(() => {});
+      }).catch(e => ({ ok: false, status: 0, _err: e.message }));
+
+      if (!aRes.ok && aRes.status !== 404) {
+        console.error(`[sweep] agent delete failed for ${r.slug} (${aRes.status})`);
+        continue; // leave the row unmarked so the next sweep retries it
+      }
 
       if (r.llm_id) {
-        await fetch(`https://api.retellai.com/delete-retell-llm/${r.llm_id}`, {
+        const lRes = await fetch(`${RETELL}/delete-retell-llm/${r.llm_id}`, {
           method  : 'DELETE',
           headers : { Authorization: `Bearer ${RETELL_API_KEY}` },
-        }).catch(() => {});
+        }).catch(e => ({ ok: false, status: 0, _err: e.message }));
+        if (!lRes.ok && lRes.status !== 404) {
+          console.error(`[sweep] llm delete failed for ${r.slug} (${lRes.status})`);
+        }
       }
 
       await db.markAgentDeleted(r.slug);
