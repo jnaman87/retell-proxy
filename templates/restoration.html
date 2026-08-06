@@ -341,7 +341,14 @@ applyPalette(_cfg.primaryColor || params.get('primary') || '82998A',
         };
         Object.keys(vars).forEach(function (key) { document.documentElement.style.setProperty(key, vars[key]); });
       }
-      applyPalette(params.get('primary') || '82998A', params.get('secondary') || '17231C');
+  // ✅ FIX: Read primary/secondary from DEMO_CONFIG directly (not via params)
+      // params is built from DEMO_CONFIG but passes colours through || '' which
+      // can silently drop them. Reading _cfg directly is safer.
+      var _cfg2 = window.DEMO_CONFIG || {};
+      applyPalette(
+        (_cfg2.primaryColor   || '').replace(/^#/,'') || params.get('primary')   || '82998A',
+        (_cfg2.secondaryColor || '').replace(/^#/,'') || params.get('secondary') || '17231C'
+      );
       var businessName = cleanText(params.get('name'), 'Your Restoration Team');
       var city = cleanText(params.get('city'), 'your area');
       var focus = cleanText(params.get('focus'), 'full-service').toLowerCase();
