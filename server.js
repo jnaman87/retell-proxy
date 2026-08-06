@@ -429,6 +429,18 @@ you worked out in step 1. Never guess or invent times.
 Once you call the tool, DO NOT wait for the caller to speak.
 The tool will return available slots \u2014 speak them out immediately when you have them.
 
+STEP 3b - IF NO SLOTS FOUND IN THE NEXT 2 DAYS
+If check_availability returns a message about no openings during regular hours:
+- Do NOT keep checking other dates.
+- The tool response already asked the caller what time works best.
+  Wait for their answer: morning, afternoon, or evening, or something specific.
+- Once they give any answer, immediately call the request_followup tool with:
+    preferredTime: exactly what they said (e.g. "mornings", "after 5pm")
+    timezone: the same IANA timezone you established in step 1
+- After request_followup responds, end the call naturally.
+- Do NOT ask for their name, last name, or email in this path.
+- Do NOT ask any other question after they give their preferred time.
+
 STEP 4 - OFFER SLOTS AND LOCK ONE IN
 One slot available: "I have [day] at [time]. Does that work for you?"
 Several available: "I have [time 1], [time 2], or [time 3]. Which suits you best?"
@@ -535,9 +547,19 @@ app.get('/stats', async (_req, res) => {
 });
 
 const cleanBusinessName = (name) => (name || '')
+  // Strip legal entity suffixes (LLC, Inc, Corp, etc.)
   .replace(/[,.]?\s*(LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|Co\.?|Company|Pvt\.?\s*Ltd\.?|LLP|LP|PLLC|PA|PC)\s*\.?$/gi, '')
+  // Strip trailing " Group" (e.g. "Smith Restoration Group" → "Smith Restoration")
+  .replace(/\s+Group\s*$/gi, '')
+  // Strip "of [City]" suffix (e.g. "Premier Plumbing of Houston" → "Premier Plumbing")
+  .replace(/\s+of\s+[A-Za-z][A-Za-z\s]{0,30}$/gi, '')
+  // Strip " - [City]" suffix (e.g. "Elite Towing - Dallas" → "Elite Towing")
+  // Uses " - " with spaces around dash to avoid stripping hyphenated brand names
+  .replace(/\s+-\s+[A-Za-z][A-Za-z\s]{0,30}$/g, '')
+  // Normalize whitespace
   .replace(/\s{2,}/g, ' ')
   .trim();
+
 
 // ── computePalette ─────────────────────────────────────────────────────────────
 // Server-side mirror of the template's applyPalette() function.
@@ -599,6 +621,7 @@ app.post('/create-agent', async (req, res) => {
     const coreServices   = pick('coreServices', 'Core Services');
     const tagline        = pick('tagline', 'Business Tagline');
     const callerFaqs     = pick('callerFaqs', 'Caller FAQs');
+    const contactId = pick('contactId', 'contact_id', 'id', 'Contact Id', 'contactID');
     const primaryColor   = pick(
       'primaryColor',   'primary_color',
       'Brand Primary Color',   'brand_primary_color',   'brandPrimaryColor',
@@ -640,53 +663,73 @@ app.post('/create-agent', async (req, res) => {
         begin_message         : openingLine,
         general_prompt        : systemPrompt,
         general_tools: [
-          {
-            type                         : 'custom',
-            name                         : 'check_availability',
-            description                  : 'Check available appointment slots. Call this whenever the caller wants to book or asks about available times. After calling this tool, speak the result immediately — do not wait for the caller to say anything.',
-            speak_during_execution       : true,
-            // ✅ FIX 1: Changed from false → true so Retell speaks the result
-            // immediately without an extra LLM round-trip. Eliminates the
-            // "silent waiting" gap after the execution message.
-            speak_after_execution        : true,
-            execution_message_description: 'Tell the caller you are checking available times for them, e.g. "Let me check what times we have available for you."',
-            url                          : `${RAILWAY_URL}/retell-tools/check-availability`,
-            parameters: {
-              type      : 'object',
-              properties: {
-                date: {
-                  type       : 'string',
-                  description: 'The calendar date to check, formatted as YYYY-MM-DD.'
-                },
-                timezone: {
-                  type       : 'string',
-                  description: 'IANA timezone derived from the location the caller gave you, e.g. America/New_York, America/Chicago, America/Denver, America/Phoenix, America/Los_Angeles. Never guess. Ask where they are based first if you do not know.'
-                }
-              },
-              required: ['date', 'timezone']
-            }
-          },
-          {
-            type                         : 'custom',
-            name                         : 'book_appointment',
-            description                  : 'Book a confirmed appointment slot. Only call this after the caller has confirmed their first name, last name, email, and chosen time slot.',
-            speak_during_execution       : true,
-            speak_after_execution        : true,
-            execution_message_description: 'Tell the caller you are booking that slot now, e.g. "Perfect, booking that for you now."',
-            url                          : `${RAILWAY_URL}/retell-tools/book-appointment`,
-            parameters: {
-              type      : 'object',
-              properties: {
-                firstName: { type: 'string', description: "Caller's first name, confirmed and spelled back" },
-                lastName : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
-                email    : { type: 'string', description: "Caller's email address, confirmed character by character" },
-                startTime: { type: 'string', description: 'ISO 8601 datetime string of the selected slot, e.g. 2026-08-10T14:00:00-05:00' },
-                timezone : { type: 'string', description: 'IANA timezone of the caller, e.g. America/New_York' }
-              },
-              required: ['firstName', 'lastName', 'email', 'startTime']
-            }
-          }
-        ]
+  {
+    type                         : 'custom',
+    name                         : 'check_availability',
+    description                  : 'Check available appointment slots. Call this whenever the caller wants to book or asks about available times. After calling this tool, speak the result immediately — do not wait for the caller to say anything.',
+    speak_during_execution       : true,
+    speak_after_execution        : true,
+    execution_message_description: 'Tell the caller you are checking available times for them, e.g. "Let me check what times we have available for you."',
+    url                          : `${RAILWAY_URL}/retell-tools/check-availability`,
+    parameters: {
+      type      : 'object',
+      properties: {
+        date: {
+          type       : 'string',
+          description: 'The calendar date to check, formatted as YYYY-MM-DD.'
+        },
+        timezone: {
+          type       : 'string',
+          description: 'IANA timezone derived from the location the caller gave you, e.g. America/New_York, America/Chicago, America/Denver, America/Phoenix, America/Los_Angeles. Never guess. Ask where they are based first if you do not know.'
+        }
+      },
+      required: ['date', 'timezone']
+    }
+  },
+  {
+    type                         : 'custom',
+    name                         : 'book_appointment',
+    description                  : 'Book a confirmed appointment slot. Only call this after the caller has confirmed their first name, last name, email, and chosen time slot.',
+    speak_during_execution       : true,
+    speak_after_execution        : true,
+    execution_message_description: 'Tell the caller you are booking that slot now, e.g. "Perfect, booking that for you now."',
+    url                          : `${RAILWAY_URL}/retell-tools/book-appointment`,
+    parameters: {
+      type      : 'object',
+      properties: {
+        firstName: { type: 'string', description: "Caller's first name, confirmed and spelled back" },
+        lastName : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
+        email    : { type: 'string', description: "Caller's email address, confirmed character by character" },
+        startTime: { type: 'string', description: 'ISO 8601 datetime string of the selected slot, e.g. 2026-08-10T14:00:00-05:00' },
+        timezone : { type: 'string', description: 'IANA timezone of the caller, e.g. America/New_York' }
+      },
+      required: ['firstName', 'lastName', 'email', 'startTime']
+    }
+  },
+  {
+    type                         : 'custom',
+    name                         : 'request_followup',
+    description                  : "Call this tool ONLY when check_availability has already told the caller there are no openings in the next 2 days and has asked what time of day works best. Pass the caller's answer as preferredTime.",
+    speak_during_execution       : true,
+    speak_after_execution        : true,
+    execution_message_description: 'Tell the caller you are noting their preferred time, e.g. "Perfect, I will make sure the team knows that."',
+    url                          : `${RAILWAY_URL}/retell-tools/request-followup`,
+    parameters: {
+      type      : 'object',
+      properties: {
+        preferredTime: {
+          type       : 'string',
+          description: 'The time of day the caller prefers for a follow-up call, e.g. "mornings", "after 5pm", "weekday afternoons".'
+        },
+        timezone: {
+          type       : 'string',
+          description: 'IANA timezone of the caller, e.g. America/New_York'
+        }
+      },
+      required: ['preferredTime']
+    }
+  }
+]
       })
     });
 
@@ -741,6 +784,7 @@ app.post('/create-agent', async (req, res) => {
       coreServices,
       primaryColor,
       secondaryColor,
+      contactId,
       maxCalls       : 5
     });
 
@@ -982,8 +1026,10 @@ app.post('/book-appointment', async (req, res) => {
 //    on the first tool call.
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/retell-tools/check-availability', async (req, res) => {
+  const body     = req.body || {};
   const args     = toolArgs(req, 'check-availability');
   const timezone = args.timezone || 'America/New_York';
+  const agentId  = body.agent_id || ''; // Retell sends this — used by request_followup later
 
   let date = args.date;
   if (!date) {
@@ -992,49 +1038,168 @@ app.post('/retell-tools/check-availability', async (req, res) => {
     console.warn(`[check-availability] no date supplied, defaulting to ${date}`);
   }
 
+  // Returns true if a slot falls between 9am and 7pm in the caller's timezone
+  function is9to7(slotTime) {
+    const h = parseInt(
+      new Date(slotTime).toLocaleTimeString('en-GB', {
+        hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone,
+      }).split(':')[0],
+      10
+    );
+    return h >= 9 && h < 19;
+  }
+
+  function fmtSlots(slots, dateStr) {
+    const times = slots.slice(0, 3).map(s =>
+      new Date(s).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone })
+    ).join(', ');
+    return slots.length === 1
+      ? `On ${dateStr} I have one opening at ${times}. Does that work for you?`
+      : `On ${dateStr} I have openings at ${times}. Which of those works best for you?`;
+  }
+
   try {
-    const nextDay = new Date(`${date}T12:00:00Z`);
-    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-    const endDate = nextDay.toISOString().split('T')[0];
+    // Fetch a 2-day window in one API call
+    const day2 = (() => {
+      const d = new Date(date + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() + 1);
+      return d.toISOString().split('T')[0];
+    })();
+    const endDate = (() => {
+      const d = new Date(date + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() + 2);
+      return d.toISOString().split('T')[0];
+    })();
+
     const startTs = new Date(date).getTime();
     const endTs   = new Date(endDate).getTime();
     const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
       `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
+
     const crmRes = await fetch(url, {
       headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15' },
     });
     const data = await crmRes.json();
+
     if (!crmRes.ok) {
       return res.json({ result: "I'm having trouble pulling up the calendar right now. Let me have someone follow up with you directly." });
     }
 
-    const dayData  = data[date];
-    // ✅ FIX 1: Use ALL slots from the calendar — no artificial hour filter.
-    //    The calendar's own availability settings are the source of truth.
-    const allSlots = (dayData && Array.isArray(dayData.slots)) ? dayData.slots : [];
+    const raw1    = (data[date]  && Array.isArray(data[date].slots))  ? data[date].slots  : [];
+    const raw2    = (data[day2]  && Array.isArray(data[day2].slots))  ? data[day2].slots  : [];
+    const slots1  = raw1.filter(is9to7);
+    const slots2  = raw2.filter(is9to7);
 
-    if (allSlots.length === 0) {
-      const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-      return res.json({ result: `Unfortunately there are no openings on ${dateStr}. Would you like me to check another day?` });
+    // ── Day 1 has daytime slots ───────────────────────────────────────────────
+    if (slots1.length > 0) {
+      const d1Str = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      return res.json({ result: fmtSlots(slots1, d1Str) });
     }
 
-    const formatted = allSlots.slice(0, 3).map(slotTime =>
-      new Date(slotTime).toLocaleTimeString('en-US', {
-        hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
-      })
-    ).join(', ');
+    // ── Day 2 has daytime slots ───────────────────────────────────────────────
+    if (slots2.length > 0) {
+      const d1Name = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long' });
+      const d2Str  = new Date(day2  + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      const times  = slots2.slice(0, 3).map(s =>
+        new Date(s).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone })
+      ).join(', ');
+      const result = slots2.length === 1
+        ? `I don't have anything on ${d1Name} during regular hours, but I do have an opening on ${d2Str} at ${times}. Would that work for you?`
+        : `I don't have openings on ${d1Name} during regular hours, but on ${d2Str} I have slots at ${times}. Would any of those work?`;
+      return res.json({ result });
+    }
 
-    const dateStr   = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-    const slotCount = allSlots.slice(0, 3).length;
-    const result    = slotCount === 1
-      ? `On ${dateStr} I have one opening at ${formatted}. Does that work for you?`
-      : `On ${dateStr} I have openings at ${formatted}. Which of those works best for you?`;
+    // ── No daytime slots in either day — hand off to followup ────────────────
+    console.log(`[check-availability] No 9-7 slots found for ${date} or ${day2} | agentId: ${agentId}`);
+    return res.json({
+      result: `It looks like we don't have any openings in the next couple of days during regular hours. Not a problem at all — someone from the Creative Copies team will reach out to set up a time that works for you. Just so they know when to call, what time of day generally works best for you — morning, afternoon, or evening?`
+    });
 
-    return res.json({ result });
   } catch (e) {
     console.error('[retell-tools/check-availability] Exception:', e.message);
     return res.json({ result: "I'm having trouble with the calendar right now. Let me have someone reach out to confirm a time." });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RETELL TOOL WEBHOOK — POST /retell-tools/request-followup
+// Called when check_availability finds no 9am–7pm slots in the next 2 days.
+// Logs the caller's preferred time, tags them aivoice_followup in Hexona Systems,
+// and adds a note with their preferred contact window.
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/retell-tools/request-followup', async (req, res) => {
+  const body          = req.body || {};
+  const args          = toolArgs(req, 'request-followup');
+  const agentId       = body.agent_id || '';
+  const preferredTime = (args.preferredTime || args.preferred_time || 'not specified').trim();
+  const timezone      = args.timezone || 'America/New_York';
+
+  console.log(`[request-followup] agentId=${agentId} preferredTime="${preferredTime}" tz=${timezone}`);
+
+  // ── Look up the Hexona Systems contact associated with this demo ──────────────────
+  let contactId = null;
+  if (agentId) {
+    try {
+      const demo = await db.getByAgentId(agentId);
+      if (demo) contactId = demo.contact_id || null;
+    } catch (e) {
+      console.error('[request-followup] DB lookup failed:', e.message);
+    }
+  }
+
+  if (!contactId) {
+    console.warn(`[request-followup] No contactId for agentId ${agentId} — CRM update skipped`);
+  } else {
+    // ── 1. Tag the contact in Hexona Systems ──────────────────────────────────────────
+    try {
+      const tagRes = await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
+        method  : 'POST',
+        headers : {
+          Authorization  : `Bearer ${CRM_API_KEY}`,
+          Version        : '2021-04-15',
+          'Content-Type' : 'application/json',
+        },
+        body: JSON.stringify({ tags: ['aivoice_followup'] }),
+      });
+      if (tagRes.ok) {
+        console.log(`[request-followup] ✅ Tag aivoice_followup added to contact ${contactId}`);
+      } else {
+        const err = await tagRes.text();
+        console.error(`[request-followup] Tag failed (${tagRes.status}): ${err}`);
+      }
+    } catch (e) {
+      console.error('[request-followup] Tag API error:', e.message);
+    }
+
+    // ── 2. Add a note with preferred time ────────────────────────────────────
+    try {
+      const noteBody = { body: `AI Voice Demo follow-up — Caller preferred contact time: ${preferredTime} (${timezone})` };
+      // CRM_USER_ID is optional; set it in Railway env vars to your Hexona Systems user id
+      if (process.env.CRM_USER_ID) noteBody.userId = process.env.CRM_USER_ID;
+
+      const noteRes = await fetch(`${CRM_API}/contacts/${contactId}/notes`, {
+        method  : 'POST',
+        headers : {
+          Authorization  : `Bearer ${CRM_API_KEY}`,
+          Version        : '2021-04-15',
+          'Content-Type' : 'application/json',
+        },
+        body: JSON.stringify(noteBody),
+      });
+      if (noteRes.ok) {
+        console.log(`[request-followup] ✅ Note added to contact ${contactId}`);
+      } else {
+        const err = await noteRes.text();
+        console.error(`[request-followup] Note failed (${noteRes.status}): ${err}`);
+      }
+    } catch (e) {
+      console.error('[request-followup] Note API error:', e.message);
+    }
+  }
+
+  return res.json({
+    result: `Got it — the team will reach out during the ${preferredTime}. Thanks so much for your time today, and we look forward to speaking with you soon.`
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
