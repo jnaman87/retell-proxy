@@ -539,16 +539,31 @@ const cleanBusinessName = (name) => (name || '')
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/create-agent', async (req, res) => {
   try {
-    const {
-      niche          = 'restoration',
-      businessName: rawName = 'Your Business',
-      city           = 'your area',
-      coreServices   = '',
-      tagline        = '',
-      callerFaqs = '',
-      primaryColor   = '',
-      secondaryColor = ''
-    } = req.body;
+    // GHL nests workflow custom data under `customData`. Merge it over the top
+    // level so the same handler works whether the caller flattens it or not.
+    const raw = { ...(req.body || {}), ...((req.body && req.body.customData) || {}) };
+
+    // Treat empty strings as absent so a blank field falls back to its default
+    // instead of producing "" in the prompt or the slug.
+    const pick = (...keys) => {
+      for (const k of keys) {
+        const v = raw[k];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+        if (v != null && typeof v !== 'string') return v;
+      }
+      return '';
+    };
+
+    const niche          = pick('niche', 'Primary Business Type')       || 'restoration';
+    const rawName        = pick('businessName', 'company_name')         || 'Your Business';
+    const city           = pick('city', 'City')                         || 'your area';
+    const coreServices   = pick('coreServices', 'Core Services');
+    const tagline        = pick('tagline', 'Business Tagline');
+    const callerFaqs     = pick('callerFaqs', 'Caller FAQs');
+    const primaryColor   = pick('primaryColor', 'Brand Primary Color');
+    const secondaryColor = pick('secondaryColor', 'Brand Secondary Color');
+
+    console.log(`[create-agent] niche="${niche}" business="${rawName}" city="${city}"`);
 
     const businessName = cleanBusinessName(rawName);
 
@@ -1240,20 +1255,26 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
 app.post('/delete-agent', async (req, res) => {
   const b = req.body || {};
 
-  // GHL posts the whole contact record, so the agent id arrives under a custom
-  // field name rather than agentId. Check every place it can turn up.
-  let agentId = b.agentId
-             || b.agent_id
-             || b['Voice AI Agent ID']
-             || (b.customData && b.customData.voiceagent);
+  // GHL posts the whole contact record and nests workflow fields under
+  // customData. Merge both levels, and treat empty strings as absent so a
+  // blank field does not shadow a populated one elsewhere in the payload.
+  const raw  = { ...b, ...(b.customData || {}) };
+  const pick = (...keys) => {
+    for (const k of keys) {
+      const v = raw[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return '';
+  };
 
-  let llmId = b.llmId || b.llm_id;
+  let agentId = pick('agentId', 'agent_id', 'voiceagent', 'Voice AI Agent ID');
+  let llmId   = pick('llmId', 'llm_id', 'Voice AI LLM ID');
 
   // Recover the slug from the demo URL if it was not sent directly.
-  let slug = b.slug;
-  const demoUrl = b['Demo Page URL'] || b.demoUrl;
+  let slug = pick('slug');
+  const demoUrl = pick('demoUrl', 'Demo Page URL');
   if (!slug && demoUrl) {
-    const m = String(demoUrl).match(/\/([a-z0-9][a-z0-9-]{2,59})\/?$/i);
+    const m = demoUrl.match(/\/([a-z0-9][a-z0-9-]{2,59})\/?$/i);
     if (m) slug = m[1];
   }
 
@@ -1266,14 +1287,24 @@ app.post('/delete-agent', async (req, res) => {
     } catch (e) { console.error('[delete-agent] lookup failed:', e.message); }
   }
 
+  // No agent id and no demo URL anywhere means this contact never had a demo
+  // built. That is a normal state, not a failure, so do not make the workflow
+  // log an error over it.
+  if (!agentId && !slug) {
+    console.log('[delete-agent] nothing to delete for contact:', raw.contact_id || '(unknown)');
+    return res.json({
+      success : true,
+      noop    : true,
+      message : 'No demo exists for this contact. Nothing to delete.'
+    });
+  }
+
   if (!agentId) {
-    console.error('[delete-agent] 400 | content-type:', req.get('content-type'),
-                  '| body:', JSON.stringify(b));
+    console.error(`[delete-agent] 400 | slug "${slug}" not found in database`);
     return res.status(400).json({
-      error       : 'agentId is required',
-      received    : b,
-      contentType : req.get('content-type') || null,
-      hint        : 'Send JSON with Content-Type: application/json, as {"agentId":"agent_..."} or {"slug":"..."}'
+      error : 'agentId is required',
+      slug  : slug || null,
+      hint  : 'Send {"agentId":"agent_..."} or {"slug":"..."} that exists in the demos table'
     });
   }
   const RETELL_KEY = process.env.RETELL_API_KEY;
