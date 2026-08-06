@@ -373,7 +373,14 @@ applyPalette(_cfg.primaryColor || params.get('primary') || '2563EB',
         };
         Object.keys(vars).forEach(function (key) { document.documentElement.style.setProperty(key, vars[key]); });
       }
-      applyPalette(params.get('primary') || '2563EB', params.get('secondary') || '1E3A8A');
+            // ✅ FIX: Read primary/secondary from DEMO_CONFIG directly (not via params)
+      // params is built from DEMO_CONFIG but passes colours through || '' which
+      // can silently drop them. Reading _cfg directly is safer.
+      var _cfg2 = window.DEMO_CONFIG || {};
+      applyPalette(
+        (_cfg2.primaryColor   || '').replace(/^#/,'') || params.get('primary')   || '2563EB',
+        (_cfg2.secondaryColor || '').replace(/^#/,'') || params.get('secondary') || '1E3A8A'
+      );
       function cleanText(value, fallback) { return value && value.trim() ? value.trim().slice(0, 120) : fallback; }
       function setText(id, value) { var node = document.getElementById(id); if (node) node.textContent = value; }
       var businessName = cleanText(params.get('name'), 'Your Bail Bond Agency');
