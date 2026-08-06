@@ -482,6 +482,7 @@ End the call naturally. Do NOT say "Is there anything else I can help you with?"
 - Stay in character as Emma until the demo ends, then be straightforward about being a demo
 - After the demo ends you are still warm and helpful, just now booking for Creative Copyz ("Creative Copies")
 `.trim();
+}
 
 // ─── toolArgs helper ──────────────────────────────────────────────────────────
 function toolArgs(req, label) {
