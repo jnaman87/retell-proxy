@@ -47,6 +47,7 @@ async function init(attempt = 1) {
       core_services   TEXT,
       primary_color   TEXT,
       secondary_color TEXT,
+      contact_id      TEXT,
       calls_used      INTEGER     NOT NULL DEFAULT 0,
       max_calls       INTEGER     NOT NULL DEFAULT 5,
       created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -56,7 +57,12 @@ async function init(attempt = 1) {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS demos_agent_id_idx ON demos (agent_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS demos_expiry_idx   ON demos (expires_at);`);
+  await pool.query(`ALTER TABLE demos ADD COLUMN IF NOT EXISTS contact_id TEXT`)
+  .catch(e => console.warn('[db] contact_id migration skipped:', e.message));
   console.log('[db] schema ready');
+  await pool.query(`ALTER TABLE demos ADD COLUMN IF NOT EXISTS secondary_color TEXT`)
+  .catch(e => console.warn('[db] secondary_color migration skipped:', e.message));
+
 }
 
 // ─── Slug availability (used by generateSlug) ────────────────────────────────
@@ -70,13 +76,17 @@ async function createDemo(d) {
   const { rows } = await pool.query(
     `INSERT INTO demos
        (slug, agent_id, llm_id, niche, business_name, city, tagline,
-        core_services, primary_color, secondary_color, max_calls, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now() + ($12 || ' days')::interval)
+        core_services, primary_color, secondary_color, contact_id, max_calls, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now() + ($13 || ' days')::interval)
      RETURNING *`,
     [
       d.slug, d.agentId, d.llmId, d.niche, d.businessName, d.city, d.tagline,
-      d.coreServices || '', d.primaryColor || '', d.secondaryColor || '',
-      d.maxCalls || 5, String(DEMO_LIFE_DAYS),
+      d.coreServices   || '',
+      d.primaryColor   || '',
+      d.secondaryColor || '',
+      d.contactId      || null,   // NEW
+      d.maxCalls || 5,
+      String(DEMO_LIFE_DAYS),
     ]
   );
   return rows[0];
@@ -89,6 +99,14 @@ async function getBySlug(slug) {
   const { rows } = await pool.query(
     `SELECT *, (expires_at <= now()) AS expired FROM demos WHERE slug = $1`,
     [slug]
+  );
+  return rows[0] || null;
+}
+// ─── Read by agent ID (used by /retell-tools/request-followup) ───────────────
+async function getByAgentId(agentId) {
+  const { rows } = await pool.query(
+    `SELECT *, (expires_at <= now()) AS expired FROM demos WHERE agent_id = $1`,
+    [agentId]
   );
   return rows[0] || null;
 }
@@ -160,7 +178,7 @@ async function stats() {
 }
 
 module.exports = {
-  init, slugTaken, createDemo, getBySlug,
+  init, slugTaken, createDemo, getBySlug, getByAgentId,  // getByAgentId is new
   reserveCall, releaseCall,
   listExpiredUndeleted, markAgentDeleted, stats,
   pool,
