@@ -461,10 +461,24 @@ MANDATORY. Same correction loop.
 
 STEP 7 - EMAIL
 Ask: "What is the best email for your confirmation?"
-Then read the whole address back character by character, including the domain:
-"That is j-o-h-n at g-m-a-i-l dot com, is that right?"
-MANDATORY. Never assume a spelling. Never skip this because the address sounds ordinary.
-If they correct any part of it, read the entire address back again until they confirm.
+
+Read it back one character at a time. This is the single most error-prone moment
+in the call, so slow down and follow these rules exactly:
+
+- Say every character separately, including the part before the @.
+- If the SAME LETTER APPEARS TWICE IN A ROW, say it as "double" plus the letter.
+  "ccopyz" is "double C, O, P, Y, Z". Never say it once. Never merge them.
+- Say "at" for @ and "dot" for the full stop.
+- Never pronounce any part of the address as a word. "gmail" is
+  "G-M-A-I-L", not "gmail".
+- Numbers are said individually: "2 4" not "twenty four".
+
+Example: anne@ccopyz.net is read back as
+"A, N, N, E, at, double C, O, P, Y, Z, dot, N, E, T. Is that right?"
+
+MANDATORY. Never skip this because the address sounds ordinary.
+If they correct any part, read the WHOLE address back again from the start,
+and keep going until they confirm it is right.
 
 STEP 8 - BOOK AND CLOSE
 Use the book_appointment tool with firstName, lastName, email, the chosen
@@ -484,6 +498,22 @@ End the call naturally. Do NOT say "Is there anything else I can help you with?"
   "That is a great question, and exactly the kind of thing the real version would know
    for your business. That detail gets built in during setup."
 
+## ENDING THE CALL - USE THE end_call TOOL
+You have an end_call tool. Nothing hangs up unless you call it.
+
+Say your closing sentence first, then call end_call in the same turn.
+Never call it before speaking, or the caller hears silence and a disconnect.
+
+Call end_call after any of these, and do not ask another question first:
+- book_appointment came back confirmed and you have read the confirmation out
+- request_followup came back and you have thanked them
+- the caller says they are not interested, or declines the setup call
+- the caller says goodbye, thanks you, or otherwise signals they are done
+- a tool has failed twice and you have told them the team will email them
+
+Do not wait for the caller to hang up. Do not say "is there anything else".
+Once the reason for the call is resolved, close warmly and end it.
+
 ## GUARDRAILS
 - Never mention or compare competitor companies
 - Never make up specific facts about ${businessName}: prices, staff names, response times
@@ -492,6 +522,7 @@ End the call naturally. Do NOT say "Is there anything else I can help you with?"
 - Never skip the spell-back on a name or an email
 - Never check the calendar before you know where the caller is based
 - Stay in character as Emma until the demo ends, then be straightforward about being a demo
+- Never merge a doubled letter when spelling. Say "double C", not "C"
 - After the demo ends you are still warm and helpful, just now booking for Creative Copyz ("Creative Copies")
 `.trim();
 }
@@ -561,12 +592,59 @@ const cleanBusinessName = (name) => (name || '')
   .trim();
 
 
+// ── orderPalette ───────────────────────────────────────────────────────────────
+// The template uses secondary for the page background (--b0) and primary for the
+// button fill, orb and glows. Two rules follow from that:
+//   1. The darker of the two colours must be the secondary.
+//   2. Primary must be light enough for the dark button text to be readable,
+//      since .button is color: var(--b0) on background: var(--p).
+// Scraped brand colours arrive in any order, so normalise here rather than
+// trusting whatever the CRM happened to store.
+function relLuminance(hex) {
+  const h = String(hex || '').replace(/^#/, '');
+  const c = [0, 2, 4].map(i => {
+    let v = parseInt(h.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+
+function lightenHex(hex, t) {
+  const h = String(hex || '').replace(/^#/, '');
+  return [0, 2, 4]
+    .map(i => Math.round(parseInt(h.slice(i, i + 2), 16) * (1 - t) + 255 * t))
+    .map(v => v.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase();
+}
+
+function orderPalette(primary, secondary) {
+  const clean = (hex, fallback) => {
+    const v = String(hex || '').replace(/[^a-fA-F0-9]/g, '');
+    const e = v.length === 3 ? v.split('').map(c => c + c).join('') : v;
+    return /^[a-fA-F0-9]{6}$/.test(e) ? e.toUpperCase() : fallback;
+  };
+
+  let p = clean(primary, '2563EB');
+  let s = clean(secondary, '1E3A8A');
+
+  // Darker colour goes to the background slot.
+  if (relLuminance(p) < relLuminance(s)) { const t = p; p = s; s = t; }
+
+  // Keep the button legible: dark text needs a reasonably light fill.
+  let guard = 0;
+  while (relLuminance(p) < 0.30 && guard++ < 12) p = lightenHex(p, 0.18);
+
+  return { primary: p, secondary: s };
+}
+
 // ── computePalette ─────────────────────────────────────────────────────────────
 // Server-side mirror of the template's applyPalette() function.
 // Pre-computes the full set of CSS custom properties (--p, --s, --b0…--bd)
 // from just two input hex colours, using the exact same mixing formula.
 // This lets the server inject correct colours directly into <head> as inline
 // style properties — so the page renders the right palette before any JS runs.
+// Feed it the output of orderPalette, not the raw stored values.
 function computePalette(primaryHex, secondaryHex) {
   function parseHex(hex) {
     const v = String(hex || '').replace(/[^a-fA-F0-9]/g, '');
@@ -599,7 +677,6 @@ function computePalette(primaryHex, secondaryHex) {
     '--td': 'rgba(240,240,240,.20)',
   };
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-agent
 // ─────────────────────────────────────────────────────────────────────────────
@@ -728,6 +805,11 @@ app.post('/create-agent', async (req, res) => {
       },
       required: ['preferredTime']
     }
+  },
+          {
+    type        : 'end_call',
+    name        : 'end_call',
+    description : 'Hang up the call. Call this immediately after a booking is confirmed, after a follow-up time has been noted, or when the caller says they are not interested. Always say your closing line first, then call this.'
   }
 ]
       })
@@ -1245,7 +1327,6 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       console.error('[retell-tools/book-appointment] Contact upsert failed:', JSON.stringify(contactData));
       return res.json({
         result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
-        end_call : true,
       });
     }
 
@@ -1254,7 +1335,6 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       console.error('[retell-tools/book-appointment] No contactId in upsert response:', JSON.stringify(contactData));
       return res.json({
         result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
-        end_call : true,
       });
     }
 
@@ -1293,7 +1373,6 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       console.error('[retell-tools/book-appointment] Appointment failed:', JSON.stringify(data, null, 2));
       return res.json({
         result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
-        end_call : true,
       });
     }
 
@@ -1304,15 +1383,13 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
 
     console.log(`[retell-tools/book-appointment] ✅ Booked — id: ${data.id || data.appointmentId}`);
     return res.json({
-      result   : `You're all booked, ${firstName}! Your discovery call is confirmed for ${timeStr}. A confirmation is on its way to your email, and the team will be in touch before the call.`,
-      end_call : true,
+      result   : `You're all booked, ${firstName}! Your discovery call is confirmed for ${timeStr}. The confirmation is on its way to ${email}, and the team will be in touch before the call.`,
     });
 
   } catch (e) {
     console.error('[retell-tools/book-appointment] Exception:', e.message);
     return res.json({
       result   : "Something went wrong on my end. Please use the 'Book a Discovery Call' button on the page and we'll get you sorted.",
-      end_call : true,
     });
   }
 });
@@ -1344,8 +1421,8 @@ app.get('/demo-config/:slug', async (req, res) => {
       businessName   : r.business_name,
       city           : r.city,
       tagline        : r.tagline || NICHE_DEFAULT_TAGLINES[r.niche] || 'AI-powered voice reception, built for your business.',
-      primaryColor   : r.primary_color,
-      secondaryColor : r.secondary_color,
+      primaryColor   : '#' + orderPalette(r.primary_color, r.secondary_color).primary,
+      secondaryColor : '#' + orderPalette(r.primary_color, r.secondary_color).secondary,
       created        : new Date(r.created_at).getTime(),
       expiresAt      : new Date(r.expires_at).getTime(),
       callsUsed      : r.calls_used,
@@ -1402,9 +1479,11 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   // template (2563EB / 1E3A8A) so DEMO_CONFIG.primaryColor is NEVER
   // an empty string — an empty string causes the template's applyPalette
   // to also fall through to its own defaults, making colours unreachable.
-  const pHex    = (r.primary_color   || '').replace(/^#/, '') || '2563EB';
-  const sHex    = (r.secondary_color || '').replace(/^#/, '') || '1E3A8A';
+  const ordered = orderPalette(r.primary_color, r.secondary_color);
+  const pHex    = ordered.primary;
+  const sHex    = ordered.secondary;
   const palette = computePalette(pHex, sHex);
+  console.log(`[slug] ${slug} palette: stored p=${r.primary_color} s=${r.secondary_color} -> serving p=#${pHex} s=#${sHex}`);
 
   // Build an inline-JS snippet that calls setProperty() on <html> immediately.
   // setProperty() on element.style has the highest specificity possible and
