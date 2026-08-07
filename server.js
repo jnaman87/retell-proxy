@@ -1928,7 +1928,7 @@ db.init()
       console.log('=====================================\n');
     });
     // ── Cold email loops ────────────────────────────────────────────────────
-    if (process.env.GOOGLE_SA_GETCREATIVECOPYZ_COM) {
+    if (process.env.GOOGLE_SA_CRETIVECOPYZ_COM) {
       setInterval(runSendLoop, 2 * 60 * 1000);
       setInterval(detectRepliesAndBounces, 20 * 60 * 1000);
       runSendLoop();
