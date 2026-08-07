@@ -1198,7 +1198,7 @@ app.post('/retell-tools/request-followup', async (req, res) => {
   }
 
   return res.json({
-    result: `Got it — the team will reach out during the ${preferredTime}. Thanks so much for your time today, and we look forward to speaking with you soon.`,
+    result: `Got it — I've added a note for the team, and someone will reach out to you to lock in a time for that call. Thanks so much for your time today, and we look forward to speaking with you soon.`,
     end_call: true,
   });
 });
