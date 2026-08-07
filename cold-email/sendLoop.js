@@ -1,7 +1,7 @@
 'use strict';
 const pool          = require('./pool');
 const { sendEmail } = require('./gmail-sender');
-const SEQUENCE      = require('./sequence');
+const SEQUENCES     = require('./sequence');
 
 async function pickMailbox() {
   const row = await pool.query(
@@ -40,8 +40,9 @@ async function runSendLoop() {
       // Timezone gate — skip if outside 8am–5pm prospect local time
       if (!isInSendWindow(enrollment.prospect_tz)) continue;
 
-      // Get step template
-      const template = SEQUENCE[enrollment.step];
+      // Get niche sequence and step template
+      const nicheSeq = SEQUENCES[enrollment.niche] || SEQUENCES.restoration;
+      const template = nicheSeq[enrollment.step];
       if (!template) {
         await pool.query(
           `UPDATE enrollments SET status = 'completed' WHERE id = $1`,
@@ -54,10 +55,7 @@ async function runSendLoop() {
       const mailbox = await pickMailbox();
       if (!mailbox) continue;
 
-      // Subject — Re: prefix on all follow-ups
-      const subject = enrollment.step === 0
-        ? template.subject
-        : `Re: ${SEQUENCE[0].subject}`;
+      const subject = template.subject(enrollment);
 
       try {
         const result = await sendEmail({
@@ -72,7 +70,7 @@ async function runSendLoop() {
         });
 
         const nextStep = enrollment.step + 1;
-        const isDone   = nextStep >= SEQUENCE.length;
+        const isDone   = nextStep >= nicheSeq.length;
 
         await pool.query(
           `UPDATE enrollments SET
