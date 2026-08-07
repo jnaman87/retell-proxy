@@ -1209,31 +1209,43 @@ app.post('/retell-tools/request-followup', async (req, res) => {
 app.post('/retell-tools/book-appointment', async (req, res) => {
   const args = toolArgs(req, 'book-appointment');
   const { firstName, lastName, email, phone = '', startTime, timezone = 'America/New_York' } = args;
+
   const missing = [];
   if (!firstName) missing.push('first name');
   if (!lastName)  missing.push('last name');
   if (!email)     missing.push('email address');
   if (!startTime) missing.push('the appointment time');
   if (missing.length) {
-    return res.json({ result: `I still need your ${missing.join(' and ')} to complete the booking. Could you share that?` });
+    return res.json({
+      result   : `I still need your ${missing.join(' and ')} to complete the booking. Could you share that?`,
+      end_call : false,
+    });
   }
+
   try {
     const endTime = (() => {
       const d = new Date(startTime);
       d.setMinutes(d.getMinutes() + 30);
       return d.toISOString();
     })();
-    const contactInfo = { firstName, lastName, email };
-if (phone) contactInfo.phone = phone;   // only include if non-empty
 
-const payload = {
-  calendarId  : CRM_CALENDAR_ID,
-  locationId  : CRM_LOCATION_ID,
-  contactInfo,
-  startTime,
-  endTime,
-  timezone,   // move to top level — this is the appointment timezone
-};
+    // Build contactInfo — only include phone if the caller provided one
+    const contactInfo = { firstName, lastName, email };
+    if (phone) contactInfo.phone = phone;
+
+    // timezone goes at TOP LEVEL — not inside contactInfo
+    const payload = {
+      calendarId  : CRM_CALENDAR_ID,
+      locationId  : CRM_LOCATION_ID,
+      contactInfo,
+      startTime,
+      endTime,
+      timezone,
+    };
+
+    // Log the payload so you can verify what's being sent to Hexona Systems
+    console.log('[retell-tools/book-appointment] Payload:', JSON.stringify(payload, null, 2));
+
     const crmRes = await fetch(`${CRM_API}/calendars/events/appointments`, {
       method  : 'POST',
       headers : {
@@ -1243,25 +1255,34 @@ const payload = {
       },
       body : JSON.stringify(payload),
     });
+
     const data = await crmRes.json();
+
     if (!crmRes.ok) {
-  console.error('[retell-tools/book-appointment] CRM error:', JSON.stringify(data, null, 2));
-  return res.json({
-    result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
-    end_call : true,   // ADD THIS
-  });
-}
+      console.error('[retell-tools/book-appointment] CRM error:', JSON.stringify(data, null, 2));
+      return res.json({
+        result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
+        end_call : true,
+      });
+    }
+
     const timeStr = new Date(startTime).toLocaleString('en-US', {
-      weekday: 'long', month: 'long', day: 'numeric',
-      hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
+      weekday : 'long', month: 'long', day: 'numeric',
+      hour    : 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
     });
+
+    console.log(`[retell-tools/book-appointment] ✅ Booked — id: ${data.id || data.appointmentId}`);
     return res.json({
-      result: `You're all booked, ${firstName}! Your discovery call is confirmed for ${timeStr}. A confirmation will be sent to ${email}. We're looking forward to speaking with you!`,
-      end_call: true,
+      result   : `You're all booked, ${firstName}! Your discovery call is confirmed for ${timeStr}. A confirmation is on its way to your email, and the team will be in touch before the call.`,
+      end_call : true,
     });
+
   } catch (e) {
     console.error('[retell-tools/book-appointment] Exception:', e.message);
-    return res.json({ result: "Something went wrong on my end. Please use the 'Book a Discovery Call' button on the page and we'll get you sorted." });
+    return res.json({
+      result   : "Something went wrong on my end. Please use the 'Book a Discovery Call' button on the page and we'll get you sorted.",
+      end_call : true,
+    });
   }
 });
 
