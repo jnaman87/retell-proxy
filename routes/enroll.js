@@ -65,3 +65,4 @@ router.post('/enroll', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.resolveTimezone = resolveTimezone;
