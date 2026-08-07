@@ -321,7 +321,11 @@
         };
         Object.keys(vars).forEach(function (key) { document.documentElement.style.setProperty(key, vars[key]); });
       }
-      applyPalette(params.get('primary') || 'F59E0B', params.get('secondary') || '78350F');
+  var _cfg2 = window.DEMO_CONFIG || {};
+      applyPalette(
+        (_cfg2.primaryColor   || '').replace(/^#/,'') || params.get('primary')   || 'F59E0B',
+        (_cfg2.secondaryColor || '').replace(/^#/,'') || params.get('secondary') || '78350F'
+      );
       function cleanText(value, fallback) { return value && value.trim() ? value.trim().slice(0, 120) : fallback; }
       function setText(id, value) { var node = document.getElementById(id); if (node) node.textContent = value; }
       var businessName = cleanText(params.get('name'), 'Your Locksmith Service');
