@@ -1223,28 +1223,59 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
   }
 
   try {
+    // ── STEP 1: Upsert contact ────────────────────────────────────────
+    const contactBody = { locationId: CRM_LOCATION_ID, firstName, lastName, email };
+    if (phone) contactBody.phone = phone;
+
+    console.log('[retell-tools/book-appointment] Upserting contact:', JSON.stringify(contactBody));
+
+    const contactRes = await fetch(`${CRM_API}/contacts/upsert`, {
+      method  : 'POST',
+      headers : {
+        Authorization  : `Bearer ${CRM_API_KEY}`,
+        Version        : '2021-07-28',
+        'Content-Type' : 'application/json',
+      },
+      body : JSON.stringify(contactBody),
+    });
+
+    const contactData = await contactRes.json();
+
+    if (!contactRes.ok) {
+      console.error('[retell-tools/book-appointment] Contact upsert failed:', JSON.stringify(contactData));
+      return res.json({
+        result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
+        end_call : true,
+      });
+    }
+
+    const contactId = contactData.contact?.id;
+    if (!contactId) {
+      console.error('[retell-tools/book-appointment] No contactId in upsert response:', JSON.stringify(contactData));
+      return res.json({
+        result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
+        end_call : true,
+      });
+    }
+
+    console.log(`[retell-tools/book-appointment] Contact ready — id: ${contactId}`);
+
+    // ── STEP 2: Book the appointment using contactId ──────────────────────
     const endTime = (() => {
       const d = new Date(startTime);
       d.setMinutes(d.getMinutes() + 30);
       return d.toISOString();
     })();
 
-    // Build contactInfo — only include phone if the caller provided one
-    const contactInfo = { firstName, lastName, email };
-    if (phone) contactInfo.phone = phone;
-
-    // timezone goes at TOP LEVEL — not inside contactInfo
-    const payload = {
-      calendarId  : CRM_CALENDAR_ID,
-      locationId  : CRM_LOCATION_ID,
-      contactInfo,
+    const apptPayload = {
+      calendarId : CRM_CALENDAR_ID,
+      locationId : CRM_LOCATION_ID,
+      contactId,
       startTime,
       endTime,
-      timezone,
     };
 
-    // Log the payload so you can verify what's being sent to Hexona Systems
-    console.log('[retell-tools/book-appointment] Payload:', JSON.stringify(payload, null, 2));
+    console.log('[retell-tools/book-appointment] Appointment payload:', JSON.stringify(apptPayload, null, 2));
 
     const crmRes = await fetch(`${CRM_API}/calendars/events/appointments`, {
       method  : 'POST',
@@ -1253,13 +1284,13 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
         Version        : '2021-04-15',
         'Content-Type' : 'application/json',
       },
-      body : JSON.stringify(payload),
+      body : JSON.stringify(apptPayload),
     });
 
     const data = await crmRes.json();
 
     if (!crmRes.ok) {
-      console.error('[retell-tools/book-appointment] CRM error:', JSON.stringify(data, null, 2));
+      console.error('[retell-tools/book-appointment] Appointment failed:', JSON.stringify(data, null, 2));
       return res.json({
         result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
         end_call : true,
@@ -1285,7 +1316,6 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
     });
   }
 });
-
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /demo-config/:slug
 // ─────────────────────────────────────────────────────────────────────────────
