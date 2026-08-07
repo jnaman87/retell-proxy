@@ -424,17 +424,38 @@ you worked out in step 1. Never guess or invent times.
 Once you call the tool, DO NOT wait for the caller to speak.
 The tool will return available slots \u2014 speak them out immediately when you have them.
 
-STEP 3b - IF NO SLOTS FOUND IN THE NEXT 2 DAYS
-If check_availability returns a message about no openings during regular hours:
-- Do NOT keep checking other dates.
-- The tool response already asked the caller what time works best.
-  Wait for their answer: morning, afternoon, or evening, or something specific.
-- Once they give any answer, immediately call the request_followup tool with:
-    preferredTime: exactly what they said (e.g. "mornings", "after 5pm")
-    timezone: the same IANA timezone you established in step 1
-- After request_followup responds, end the call naturally.
-- Do NOT ask for their name, last name, or email in this path.
-- Do NOT ask any other question after they give their preferred time.
+STEP 3b - IF THERE ARE NO OPENINGS IN THE NEXT 2 DAYS
+If check_availability says there are no openings during regular hours, do not
+keep checking other dates. Switch to taking their details so the team can reach
+out instead. Same rules apply: ONE question per turn, and every spell-back is
+mandatory.
+ 
+3b-1  PREFERRED TIME
+      The tool response already asked what time of day suits them.
+      Wait for their answer: morning, afternoon, evening, or something specific.
+ 
+3b-2  FIRST NAME
+      Ask: "And what is your first name?"
+      Spell it back letter by letter: "That is J-O-H-N, is that right?"
+      MANDATORY. Keep correcting until they confirm.
+ 
+3b-3  LAST NAME
+      Only after the first name is confirmed. Ask: "And your last name?"
+      Spell it back letter by letter. MANDATORY.
+ 
+3b-4  EMAIL
+      Ask: "And the best email for the team to reach you on?"
+      Read the whole address back one character at a time, following the same
+      email rules as STEP 7 below, including saying "double" for any letter that
+      appears twice in a row. MANDATORY.
+ 
+3b-5  SEND IT
+      Call request_followup with firstName, lastName, email, preferredTime, and
+      the timezone you established in step 1.
+      Once it responds, say your closing line and call end_call.
+ 
+Do not skip the name or the email in this path. Without them the team has no way
+to reach the caller and the whole conversation is wasted.
 
 STEP 4 - OFFER SLOTS AND LOCK ONE IN
 One slot available: "I have [day] at [time]. Does that work for you?"
@@ -855,24 +876,21 @@ app.post('/create-agent', async (req, res) => {
   {
     type                         : 'custom',
     name                         : 'request_followup',
-    description                  : "Call this tool ONLY when check_availability has already told the caller there are no openings in the next 2 days and has asked what time of day works best. Pass the caller's answer as preferredTime.",
+    description                  : "Call this tool ONLY when check_availability has said there are no openings in the next 2 days, AND you have collected the caller's first name, last name, email and preferred time of day. The team uses these to reach out and arrange a time.",
     speak_during_execution       : true,
     speak_after_execution        : true,
-    execution_message_description: 'Tell the caller you are noting their preferred time, e.g. "Perfect, I will make sure the team knows that."',
+    execution_message_description: 'Tell the caller you are passing their details to the team, e.g. "Perfect, let me get that over to the team now."',
     url                          : `${RAILWAY_URL}/retell-tools/request-followup`,
     parameters: {
       type      : 'object',
       properties: {
-        preferredTime: {
-          type       : 'string',
-          description: 'The time of day the caller prefers for a follow-up call, e.g. "mornings", "after 5pm", "weekday afternoons".'
-        },
-        timezone: {
-          type       : 'string',
-          description: 'IANA timezone of the caller, e.g. America/New_York'
-        }
+        firstName    : { type: 'string', description: "Caller's first name, confirmed and spelled back" },
+        lastName     : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
+        email        : { type: 'string', description: "Caller's email address, confirmed character by character" },
+        preferredTime: { type: 'string', description: 'The time of day the caller prefers for a follow-up call, e.g. "mornings", "after 5pm", "weekday afternoons".' },
+        timezone     : { type: 'string', description: 'IANA timezone of the caller, e.g. America/New_York' }
       },
-      required: ['preferredTime']
+      required: ['firstName', 'lastName', 'email', 'preferredTime']
     }
   },
           {
@@ -1286,80 +1304,109 @@ app.post('/retell-tools/check-availability', async (req, res) => {
 // and adds a note with their preferred contact window.
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/retell-tools/request-followup', async (req, res) => {
-  const body          = req.body || {};
-  const args          = toolArgs(req, 'request-followup');
-  const agentId       = body.agent_id || '';
-  const preferredTime = (args.preferredTime || args.preferred_time || 'not specified').trim();
+  const body    = req.body || {};
+  const args    = toolArgs(req, 'request-followup');
+  const agentId = body.agent_id || (body.call && body.call.agent_id) || '';
+ 
+  const firstName     = String(args.firstName || '').trim();
+  const lastName      = String(args.lastName  || '').trim();
+  const email         = String(args.email     || '').trim().toLowerCase();
+  const preferredTime = String(args.preferredTime || args.preferred_time || 'not specified').trim();
   const timezone      = args.timezone || 'America/New_York';
-
-  console.log(`[request-followup] agentId=${agentId} preferredTime="${preferredTime}" tz=${timezone}`);
-
-  // ── Look up the Hexona Systems contact associated with this demo ──────────────────
-  let contactId = null;
+ 
+  const missing = [];
+  if (!firstName) missing.push('first name');
+  if (!lastName)  missing.push('last name');
+  if (!email)     missing.push('email address');
+  if (missing.length) {
+    console.warn(`[request-followup] missing ${missing.join(', ')}`);
+    return res.json({
+      result: `I still need your ${missing.join(' and ')} so the team knows how to reach you. Could you share that?`
+    });
+  }
+ 
+  console.log(`[request-followup] ${firstName} ${lastName} <${email}> prefers "${preferredTime}" (${timezone}) | agentId=${agentId || '(none)'}`);
+ 
+  // Which demo this came from. Enrichment only — the contact is resolved by
+  // email below, so a missing agent id no longer breaks the whole flow.
+  let demoLabel = '';
   if (agentId) {
     try {
-      const demo = await db.getByAgentId(agentId);
-      if (demo) contactId = demo.contact_id || null;
+      const d = await db.getByAgentId(agentId);
+      if (d) demoLabel = ` | Demo: ${d.business_name} (${d.slug})`;
     } catch (e) {
-      console.error('[request-followup] DB lookup failed:', e.message);
+      console.error('[request-followup] demo lookup failed:', e.message);
     }
   }
-
-  if (!contactId) {
-    console.warn(`[request-followup] No contactId for agentId ${agentId} — CRM update skipped`);
-  } else {
-    // ── 1. Tag the contact in Hexona Systems ──────────────────────────────────────────
-    try {
-      const tagRes = await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
-        method  : 'POST',
-        headers : {
-          Authorization  : `Bearer ${CRM_API_KEY}`,
-          Version        : '2021-04-15',
-          'Content-Type' : 'application/json',
-        },
-        body: JSON.stringify({ tags: ['aivoice_followup'] }),
+ 
+  try {
+    // ── Upsert by email. Matches an existing contact in this location and
+    //    updates it, rather than creating a duplicate card.
+    const upsertBody = { locationId: CRM_LOCATION_ID, firstName, lastName, email };
+    const upsertRes = await fetch(`${CRM_API}/contacts/upsert`, {
+      method  : 'POST',
+      headers : {
+        Authorization  : `Bearer ${CRM_API_KEY}`,
+        Version        : '2021-07-28',
+        'Content-Type' : 'application/json',
+      },
+      body: JSON.stringify(upsertBody),
+    });
+    const upsertData = await upsertRes.json();
+ 
+    if (!upsertRes.ok || !(upsertData.contact && upsertData.contact.id)) {
+      console.error('[request-followup] upsert failed:', JSON.stringify(upsertData));
+      return res.json({
+        result: `Thanks ${firstName}. I have made a note of that and someone from the team will be in touch shortly.`
       });
-      if (tagRes.ok) {
-        console.log(`[request-followup] ✅ Tag aivoice_followup added to contact ${contactId}`);
-      } else {
-        const err = await tagRes.text();
-        console.error(`[request-followup] Tag failed (${tagRes.status}): ${err}`);
-      }
-    } catch (e) {
-      console.error('[request-followup] Tag API error:', e.message);
     }
-
-    // ── 2. Add a note with preferred time ────────────────────────────────────
-    try {
-      const noteBody = { body: `AI Voice Demo follow-up — Caller preferred contact time: ${preferredTime} (${timezone})` };
-      // CRM_USER_ID is optional; set it in Railway env vars to your Hexona Systems user id
-      if (process.env.CRM_USER_ID) noteBody.userId = process.env.CRM_USER_ID;
-
-      const noteRes = await fetch(`${CRM_API}/contacts/${contactId}/notes`, {
-        method  : 'POST',
-        headers : {
-          Authorization  : `Bearer ${CRM_API_KEY}`,
-          Version        : '2021-04-15',
-          'Content-Type' : 'application/json',
-        },
-        body: JSON.stringify(noteBody),
-      });
-      if (noteRes.ok) {
-        console.log(`[request-followup] ✅ Note added to contact ${contactId}`);
-      } else {
-        const err = await noteRes.text();
-        console.error(`[request-followup] Note failed (${noteRes.status}): ${err}`);
-      }
-    } catch (e) {
-      console.error('[request-followup] Note API error:', e.message);
-    }
+ 
+    const contactId = upsertData.contact.id;
+    const isNew     = upsertData.new === true;
+    console.log(`[request-followup] contact ${isNew ? 'created' : 'matched'} — id: ${contactId}`);
+ 
+    // ── Tag
+    await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
+      method  : 'POST',
+      headers : {
+        Authorization  : `Bearer ${CRM_API_KEY}`,
+        Version        : '2021-04-15',
+        'Content-Type' : 'application/json',
+      },
+      body: JSON.stringify({ tags: ['aivoice_followup'] }),
+    }).then(r => console.log(`[request-followup] tag ${r.ok ? 'added' : 'FAILED ' + r.status}`))
+      .catch(e => console.error('[request-followup] tag error:', e.message));
+ 
+    // ── Note
+    const noteBody = {
+      body: `AI Voice Demo follow-up. No calendar openings were available during the call. `
+          + `Caller: ${firstName} ${lastName} <${email}>. `
+          + `Preferred contact time: ${preferredTime} (${timezone}).${demoLabel}`
+    };
+    if (process.env.CRM_USER_ID) noteBody.userId = process.env.CRM_USER_ID;
+ 
+    await fetch(`${CRM_API}/contacts/${contactId}/notes`, {
+      method  : 'POST',
+      headers : {
+        Authorization  : `Bearer ${CRM_API_KEY}`,
+        Version        : '2021-04-15',
+        'Content-Type' : 'application/json',
+      },
+      body: JSON.stringify(noteBody),
+    }).then(r => console.log(`[request-followup] note ${r.ok ? 'added' : 'FAILED ' + r.status}`))
+      .catch(e => console.error('[request-followup] note error:', e.message));
+ 
+    return res.json({
+      result: `Perfect, thanks ${firstName}. I have passed your details to the team and someone will reach out on ${preferredTime} to lock in a time. Thanks so much for your time today.`
+    });
+ 
+  } catch (e) {
+    console.error('[request-followup] Exception:', e.message);
+    return res.json({
+      result: `Thanks ${firstName}. Someone from the team will be in touch to arrange a time.`
+    });
   }
-
-  return res.json({
-    result: `Got it — I've added a note for the team, and someone will reach out to you to lock in a time for that call. Thanks so much for your time today, and we look forward to speaking with you soon.`,
-  });
 });
-
 // ─────────────────────────────────────────────────────────────────────────────
 // RETELL TOOL WEBHOOK — POST /retell-tools/book-appointment
 // ─────────────────────────────────────────────────────────────────────────────
