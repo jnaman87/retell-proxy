@@ -321,7 +321,11 @@
         };
         Object.keys(vars).forEach(function (key) { document.documentElement.style.setProperty(key, vars[key]); });
       }
-      applyPalette(params.get('primary') || 'F97316', params.get('secondary') || '7C2D12');
+  var _cfg2 = window.DEMO_CONFIG || {};
+      applyPalette(
+        (_cfg2.primaryColor   || '').replace(/^#/,'') || params.get('primary')   || 'F97316',
+        (_cfg2.secondaryColor || '').replace(/^#/,'') || params.get('secondary') || '7C2D12'
+      );
       function cleanText(value, fallback) { return value && value.trim() ? value.trim().slice(0, 120) : fallback; }
       function setText(id, value) { var node = document.getElementById(id); if (node) node.textContent = value; }
       var businessName = cleanText(params.get('name'), 'Your Towing Company');
