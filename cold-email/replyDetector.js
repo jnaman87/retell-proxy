@@ -62,7 +62,7 @@ async function detectRepliesAndBounces() {
               console.log(`[detect] reply from ${prospect_email} → ${email}`);
 
               if (contact_id) {
-                await tagContact(contact_id, 'cold-email-replied');
+                await tagContact(contact_id, 'aivoice_reply_received');
 
                 const noteText =
                   `Cold email reply received.\n` +
