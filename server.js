@@ -69,8 +69,8 @@ function getNicheTemplate(niche) {
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors({ origin: '*' }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 // ============================================================
 // NICHE TEMPLATES
@@ -1198,7 +1198,8 @@ app.post('/retell-tools/request-followup', async (req, res) => {
   }
 
   return res.json({
-    result: `Got it — the team will reach out during the ${preferredTime}. Thanks so much for your time today, and we look forward to speaking with you soon.`
+    result: `Got it — the team will reach out during the ${preferredTime}. Thanks so much for your time today, and we look forward to speaking with you soon.`,
+    end_call: true,
   });
 });
 
@@ -1249,6 +1250,7 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
     });
     return res.json({
       result: `You're all booked, ${firstName}! Your discovery call is confirmed for ${timeStr}. A confirmation will be sent to ${email}. We're looking forward to speaking with you!`,
+      end_call: true,
     });
   } catch (e) {
     console.error('[retell-tools/book-appointment] Exception:', e.message);
