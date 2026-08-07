@@ -19,8 +19,14 @@ const fetch    = require('node-fetch'); // v2 — CommonJS compatible
 const path     = require('path');
 const fs       = require('fs');
 const db       = require('./db');
+// ── Cold email ───────────────────────────────────────────────────────────────
+const { runSendLoop }           = require('./cold-email/sendLoop');
+const { detectRepliesAndBounces } = require('./cold-email/replyDetector');
+
+
 const app  = express();
 const PORT = process.env.PORT || 3000;
+
 
 // ─── Environment ──────────────────────────────────────────────────────────────
 const RETELL_API_KEY     = process.env.RETELL_API_KEY;
@@ -31,6 +37,7 @@ const RAILWAY_PUBLIC_URL = process.env.RAILWAY_PUBLIC_URL;
 const RETELL  = 'https://api.retellai.com';
 const CRM_API = 'https://services.leadconnectorhq.com';
 
+
 // City abbreviations for slug collision suffix
 const CITY_ABBREV = {
   'houston':'hou','dallas':'dfw','dallas-fort worth':'dfw','phoenix':'phx',
@@ -40,6 +47,7 @@ const CITY_ABBREV = {
   'toronto':'yyz','calgary':'yyc','vancouver':'yvr',
   'sydney':'syd','melbourne':'mel','brisbane':'bne'
 };
+
 
 async function generateSlug(businessName, city) {
   const base = (businessName || 'business')
@@ -58,6 +66,7 @@ async function generateSlug(businessName, city) {
   return `${base}-${abbrev}-${n}-aivoicedemo`;
 }
 
+
 const htmlTemplates = {};
 function getNicheTemplate(niche) {
   if (!htmlTemplates[niche]) {
@@ -67,10 +76,12 @@ function getNicheTemplate(niche) {
   return htmlTemplates[niche];
 }
 
+
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+
 
 // ============================================================
 // NICHE TEMPLATES
@@ -260,6 +271,7 @@ KEY POINTS TO COMMUNICATE
   }
 };
 
+
 // ============================================================
 // NICHE NORMALIZER
 // ============================================================
@@ -278,6 +290,7 @@ function normalizeNiche(niche) {
   return 'restoration';
 }
 
+
 // ============================================================
 // SYSTEM PROMPT BUILDER
 // ✅ FIX 2: Added Creative Copyz pronunciation
@@ -291,6 +304,7 @@ function buildSystemPrompt({ niche, businessName, city, coreServices, tagline, c
   });
   const opening = template.openingLine.replace('{businessName}', businessName);
 
+
   // ✅ FIX 3: Build dedicated personalisation sections only when data exists
   const servicesSection = coreServices ? `
 ## WHAT ${businessName.toUpperCase()} SPECIFICALLY OFFERS
@@ -299,9 +313,11 @@ what you cover, whether you handle a specific job type, or what sets you apart.
 Do NOT give generic industry answers — always draw from this list first:
 ${coreServices}
 
+
 If a caller asks about something not on this list, say it is a great question and that the real version
 of this agent would know the full answer. Do not make up services.
 ` : '';
+
 
   const faqSection = callerFaqs ? `
 ## HOW TO HANDLE THE MOST COMMON CALLER QUESTIONS
@@ -310,9 +326,11 @@ For each of these, give a specific, confident answer — do not deflect with gen
 Use the business name and city to make answers feel personal and local:
 ${callerFaqs}
 
+
 For any question NOT listed here, use your niche knowledge to give a helpful answer,
 but never invent specific facts (prices, staff, response times) about ${businessName}.
 ` : '';
+
 
       return `
 # AI VOICE RECEPTIONIST DEMO
@@ -320,29 +338,36 @@ Business being demoed: ${businessName}
 City: ${city}
 Today's date: ${today}
 
+
 ## WHAT THIS IS
 You are Emma, an AI voice receptionist demo built by Creative Copies.
 You are showing ${businessName} exactly what their own AI receptionist would sound like.
 You are NOT the real receptionist for ${businessName} and you cannot dispatch their team,
 book their services, or make any real commitments on their behalf.
 
+
 ## IDENTITY
 Your name is Emma. You speak as if you are the receptionist for ${businessName} in ${city}.
 ${tagline ? `Their tagline: "${tagline}"` : ''}
 
+
 ${servicesSection}
 ${faqSection}
+
 
 ## OPENING LINE
 When the call connects, say exactly:
 "${opening}"
 
+
 ${template.toneBlock}
+
 
 ## WHAT YOU DO IN THIS DEMO
 1. Answer questions about what ${businessName} does and how they help customers in ${city}
 2. Handle the conversation the way a real receptionist for ${businessName} would
 3. When the caller tries to take action, end the demo cleanly and offer to book a setup call
+
 
 ## ONE QUESTION AT A TIME - ABSOLUTE RULE
 Never ask two questions in one turn. Ask one, wait for the answer, then ask the next.
@@ -352,6 +377,7 @@ Wrong: "Can I get your first and last name?"
 Wrong: "What is your name, and what is the best email for you?"
 Right: "What is your first name?" then, after they answer, "And your last name?"
 If you notice you are about to ask a second question, stop and ask only the first.
+
 
 ## DEMO BOUNDARY - CRITICAL
 You cannot book real service appointments for ${businessName}.
@@ -365,6 +391,7 @@ The moment a caller tries to do any of the following, go to ENDING THE DEMO belo
 - Anything that would require ${businessName}'s team to act
 This is not a failure. It is the natural end of the demo.
 
+
 ## ENDING THE DEMO AND OFFERING THE SETUP CALL
 Stop role-playing and be transparent. In your own words, cover these four points in order:
 1. That is where the demo ends. You are Emma, an AI voice agent Creative Copies built
@@ -376,6 +403,7 @@ Stop role-playing and be transparent. In your own words, cover these four points
 4. Ask whether they would like you to check some times. ONE question. Then stop and wait.
 Speak it naturally in a few sentences. Never read this section aloud as a list.
 
+
 Here is the right length and tone. Adapt it, do not repeat it word for word:
 "That is actually where the demo stops. I am Emma, an AI agent Creative Copies built to
 show you what this would sound like on your own lines. A real version would take that
@@ -383,14 +411,17 @@ booking properly and work with the systems you already use. I can set up a quick
 with the Creative Copies team so they can work out exactly what needs adding to make me work for ${businessName}.
 Would you like me to check some times?"
 
+
 If they say no, thank them warmly and end the call. Do not push.
 If they say yes, go to the booking flow.
 If a tool fails twice in a row, stop retrying. Say you will have the team email
 them to arrange a time, thank them, and end the call.
 
+
 ## BOOKING FLOW
 Follow these steps in order. ONE question per turn, every time.
 Never skip a step. Never check availability before you know their timezone.
+
 
 STEP 1 - WHERE THEY ARE BASED
 Before touching the calendar, ask where they are calling from:
@@ -413,16 +444,19 @@ If they name a city you are unsure about, ask which state or country it is in.
 Never guess a timezone. Never assume the caller is in the same place as the
 business you have been role-playing.
 
+
 STEP 2 - WHICH DAY
 Ask: "And what day suits you best?"
 Convert their answer to a date. Today's date is given at the top of this prompt.
 "Tomorrow" means the day after today's date.
+
 
 STEP 3 - CHECK AVAILABILITY
 Only now, call the check_availability tool with BOTH the date and the timezone
 you worked out in step 1. Never guess or invent times.
 Once you call the tool, DO NOT wait for the caller to speak.
 The tool will return available slots \u2014 speak them out immediately when you have them.
+
 
 STEP 3b - IF THERE ARE NO OPENINGS IN THE NEXT 2 DAYS
 If check_availability says there are no openings during regular hours, do not
@@ -457,11 +491,13 @@ mandatory.
 Do not skip the name or the email in this path. Without them the team has no way
 to reach the caller and the whole conversation is wasted.
 
+
 STEP 4 - OFFER SLOTS AND LOCK ONE IN
 One slot available: "I have [day] at [time]. Does that work for you?"
 Several available: "I have [time 1], [time 2], or [time 3]. Which suits you best?"
 Wait for them to confirm a specific time before asking anything else.
 Do not ask for their name until a time is agreed.
+
 
 STEP 5 - FIRST NAME
 Ask: "What is your first name?"
@@ -469,17 +505,21 @@ Then spell it back letter by letter: "That is J-O-H-N, is that right?"
 MANDATORY. Never skip the spell-back, no matter how common or obvious the name sounds.
 If they correct you, spell it back again with the correction and keep going until confirmed.
 
+
 STEP 6 - LAST NAME
 Only after the first name is confirmed.
 Ask: "And your last name?"
 Then spell it back letter by letter: "S-M-I-T-H, correct?"
 MANDATORY. Same correction loop.
 
+
 STEP 7 - EMAIL
 Ask: "What is the best email for your confirmation?"
 
+
 Read it back one character at a time. This is the single most error-prone moment
 in the call, so slow down and follow these rules exactly:
+
 
 - Say every character separately, including the part before the @.
 - If the SAME LETTER APPEARS TWICE IN A ROW, say it as "double" plus the letter.
@@ -489,12 +529,15 @@ in the call, so slow down and follow these rules exactly:
   "G-M-A-I-L", not "gmail".
 - Numbers are said individually: "2 4" not "twenty four".
 
+
 Example: anne@ccopyz.net is read back as
 "A, N, N, E, at, double C, O, P, Y, Z, dot, N, E, T. Is that right?"
+
 
 MANDATORY. Never skip this because the address sounds ordinary.
 If they correct any part, read the WHOLE address back again from the start,
 and keep going until they confirm it is right.
+
 
 STEP 8 - BOOK AND CLOSE
 Use the book_appointment tool with firstName, lastName, email, the chosen
@@ -503,6 +546,7 @@ Once it confirms, say:
 "You are all set for [day] at [time]. A confirmation is on its way to your email, and
 the team will be in touch before the call."
 End the call naturally. Do NOT say "Is there anything else I can help you with?"
+
 
 ## SPEAKING STYLE
 - Speak naturally, like a warm and capable human receptionist
@@ -514,11 +558,14 @@ End the call naturally. Do NOT say "Is there anything else I can help you with?"
   "That is a great question, and exactly the kind of thing the real version would know
    for your business. That detail gets built in during setup."
 
+
 ## ENDING THE CALL - USE THE end_call TOOL
 You have an end_call tool. Nothing hangs up unless you call it.
 
+
 Say your closing sentence first, then call end_call in the same turn.
 Never call it before speaking, or the caller hears silence and a disconnect.
+
 
 Call end_call after any of these, and do not ask another question first:
 - book_appointment came back confirmed and you have read the confirmation out
@@ -527,8 +574,10 @@ Call end_call after any of these, and do not ask another question first:
 - the caller says goodbye, thanks you, or otherwise signals they are done
 - a tool has failed twice and you have told them the team will email them
 
+
 Do not wait for the caller to hang up. Do not say "is there anything else".
 Once the reason for the call is resolved, close warmly and end it.
+
 
 ## GUARDRAILS
 - Never mention or compare competitor companies
@@ -543,6 +592,7 @@ Once the reason for the call is resolved, close warmly and end it.
 `.trim();
 }
 
+
 // ─── toolArgs helper ──────────────────────────────────────────────────────────
 function toolArgs(req, label) {
   const b = req.body || {};
@@ -552,11 +602,13 @@ function toolArgs(req, label) {
   return args;
 }
 
+
 // ─── Request logger ───────────────────────────────────────────────────────────
 app.use((req, _res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
+
 
 // ─── Guard missing env vars ───────────────────────────────────────────────────
 function guardEnv(varName, res) {
@@ -566,6 +618,7 @@ function guardEnv(varName, res) {
   }
   return true;
 }
+
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => {
@@ -584,6 +637,7 @@ app.get('/', (_req, res) => {
   });
 });
 
+
 // ─── Campaign stats ───────────────────────────────────────────────────────────
 app.get('/stats', async (_req, res) => {
   try {
@@ -592,6 +646,10 @@ app.get('/stats', async (_req, res) => {
     return res.status(500).json({ error: e.message });
   }
 });
+
+
+app.use(require('./routes/enroll'));
+
 
 const cleanBusinessName = (name) => (name || '')
   // Strip legal entity suffixes (LLC, Inc, Corp, etc.)
@@ -607,11 +665,13 @@ const cleanBusinessName = (name) => (name || '')
   .replace(/\s{2,}/g, ' ')
   .trim();
 
+
 // ── CRM custom field write-back ───────────────────────────────────────────────
 // GHL's basic Webhook action cannot map a response back onto the contact, so the
 // server writes the fields itself. Field IDs are looked up once by name and
 // cached, which means the workflow never has to know an ID.
 let crmFieldMap = null;
+
 
 async function getCrmFieldMap() {
   if (crmFieldMap) return crmFieldMap;
@@ -638,6 +698,7 @@ async function getCrmFieldMap() {
   }
 }
 
+
 // values: { "Voice AI Agent ID": "agent_...", "Demo Page URL": "https://..." }
 // Field names must match the CRM exactly, case-insensitively.
 async function updateContactFields(contactId, values) {
@@ -645,6 +706,7 @@ async function updateContactFields(contactId, values) {
     console.warn('[crm-update] no contactId, skipping write-back');
     return false;
   }
+
 
   const map = await getCrmFieldMap();
   const customFields = [];
@@ -655,10 +717,12 @@ async function updateContactFields(contactId, values) {
     customFields.push({ id, value: String(value) });
   }
 
+
   if (!customFields.length) {
     console.warn('[crm-update] nothing to write');
     return false;
   }
+
 
   try {
     const r = await fetch(`${CRM_API}/contacts/${contactId}`, {
@@ -682,6 +746,7 @@ async function updateContactFields(contactId, values) {
   }
 }
 
+
 // ── orderPalette ───────────────────────────────────────────────────────────────
 // The template uses secondary for the page background (--b0) and primary for the
 // button fill, orb and glows. Two rules follow from that:
@@ -699,6 +764,7 @@ function relLuminance(hex) {
   return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 }
 
+
 function lightenHex(hex, t) {
   const h = String(hex || '').replace(/^#/, '');
   return [0, 2, 4]
@@ -708,6 +774,7 @@ function lightenHex(hex, t) {
     .toUpperCase();
 }
 
+
 function orderPalette(primary, secondary) {
   const clean = (hex, fallback) => {
     const v = String(hex || '').replace(/[^a-fA-F0-9]/g, '');
@@ -715,18 +782,23 @@ function orderPalette(primary, secondary) {
     return /^[a-fA-F0-9]{6}$/.test(e) ? e.toUpperCase() : fallback;
   };
 
+
   let p = clean(primary, '2563EB');
   let s = clean(secondary, '1E3A8A');
 
+
   // Darker colour goes to the background slot.
   if (relLuminance(p) < relLuminance(s)) { const t = p; p = s; s = t; }
+
 
   // Keep the button legible: dark text needs a reasonably light fill.
   let guard = 0;
   while (relLuminance(p) < 0.30 && guard++ < 12) p = lightenHex(p, 0.18);
 
+
   return { primary: p, secondary: s };
 }
+
 
 // ── computePalette ─────────────────────────────────────────────────────────────
 // Server-side mirror of the template's applyPalette() function.
@@ -748,9 +820,11 @@ function computePalette(primaryHex, secondaryHex) {
   function rgb(c)      { return 'rgb('  + c.join(',') + ')'; }
   function rgba(c, a)  { return 'rgba(' + c.join(',') + ',' + a + ')'; }
 
+
   const pHex = parseHex(primaryHex),  sHex = parseHex(secondaryHex);
   const p    = toArr(pHex),           s    = toArr(sHex);
   const B    = [0,0,0],               W    = [255,255,255];
+
 
   return {
     '--p' : '#' + pHex,
@@ -782,6 +856,7 @@ app.post('/create-agent', async (req, res) => {
       return '';
     };
 
+
     const niche          = pick('niche', 'Primary Business Type')       || 'restoration';
     const rawName        = pick('businessName', 'company_name')         || 'Your Business';
     const city           = pick('city', 'City')                         || 'your area';
@@ -802,10 +877,12 @@ app.post('/create-agent', async (req, res) => {
       'brand_secondary',       'brandSecondary',
     );
 
+
     console.log(`[create-agent] niche="${niche}" business="${rawName}" city="${city}"`);
     console.log(`[create-agent] coreServices="${coreServices}" callerFaqs="${callerFaqs}"`);
     console.log(`[create-agent] 🎨 primaryColor="${primaryColor}" secondaryColor="${secondaryColor}"`);
     console.log(`[create-agent] 📦 raw keys: ${Object.keys(raw).join(', ')}`);
+
 
     const businessName     = cleanBusinessName(rawName);
     const systemPrompt     = buildSystemPrompt({ niche, businessName, city, coreServices, tagline, callerFaqs });
@@ -814,9 +891,11 @@ app.post('/create-agent', async (req, res) => {
     const openingLine = (NICHE_TEMPLATES[nicheLabel] || NICHE_TEMPLATES.restoration)
       .openingLine.replace('{businessName}', businessName);
 
+
     const RAILWAY_URL = process.env.RAILWAY_PUBLIC_URL;
     const RETELL_KEY  = process.env.RETELL_API_KEY;
     const VOICE_ID    = process.env.RETELL_VOICE_ID || 'retell-Cimo';
+
 
     // ── STEP 1: Create Retell LLM ────────────────────────────────────────────
     const llmRes = await fetch('https://api.retellai.com/create-retell-llm', {
@@ -902,11 +981,13 @@ app.post('/create-agent', async (req, res) => {
       })
     });
 
+
     if (!llmRes.ok) {
       const err = await llmRes.text();
       throw new Error(`LLM creation failed: ${err}`);
     }
     const llmData = await llmRes.json();
+
 
     // ── STEP 2: Create Retell Agent ──────────────────────────────────────────
     const agentRes = await fetch('https://api.retellai.com/create-agent', {
@@ -932,15 +1013,18 @@ app.post('/create-agent', async (req, res) => {
       })
     });
 
+
     if (!agentRes.ok) {
       const err = await agentRes.text();
       throw new Error(`Agent creation failed: ${err}`);
     }
 
+
     const agentData = await agentRes.json();
     const slug      = await generateSlug(businessName, city);
     const DEMO_BASE = process.env.DEMO_BASE_URL || 'https://demo.creativecopyz.com';
     const demoUrl   = `${DEMO_BASE}/${slug}`;
+
 
     await db.createDemo({
       slug,
@@ -957,7 +1041,9 @@ app.post('/create-agent', async (req, res) => {
       maxCalls       : 5
     });
 
+
     console.log(`[create-agent] ✅ ${slug} → ${agentData.agent_id}`);
+
 
     // Write straight back to the contact. Not awaited on the critical path:
     // a CRM hiccup should not fail an agent that was created successfully.
@@ -980,6 +1066,7 @@ app.post('/create-agent', async (req, res) => {
   }
 });
 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-web-call
 // ─────────────────────────────────────────────────────────────────────────────
@@ -990,6 +1077,7 @@ app.post('/create-web-call', async (req, res) => {
     return res.status(400).json({ error: 'agentId is required' });
   }
 
+
   let reservation;
   try {
     reservation = await db.reserveCall(agentId);
@@ -997,6 +1085,7 @@ app.post('/create-web-call', async (req, res) => {
     console.error('[create-web-call] DB error:', e.message);
     return res.status(500).json({ error: 'Storage unavailable' });
   }
+
 
   if (!reservation.ok) {
     const messages = {
@@ -1011,6 +1100,7 @@ app.post('/create-web-call', async (req, res) => {
       error        : messages[reservation.reason] || 'This demo is not available.',
     });
   }
+
 
   try {
     const body = { agent_id: agentId, metadata };
@@ -1042,6 +1132,7 @@ app.post('/create-web-call', async (req, res) => {
     return res.status(500).json({ error: 'Exception', message: e.message });
   }
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /check-availability  (direct HTTP endpoint — not the Retell webhook)
@@ -1079,6 +1170,7 @@ app.get('/check-availability', async (req, res) => {
     return res.status(500).json({ error: 'Exception', message: e.message });
   }
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /check-specific-time
@@ -1127,6 +1219,7 @@ app.get('/check-specific-time', async (req, res) => {
     return res.status(500).json({ error: 'Exception', message: e.message });
   }
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /book-appointment  (direct HTTP endpoint — not the Retell webhook)
@@ -1193,6 +1286,7 @@ app.post('/book-appointment', async (req, res) => {
   }
 });
 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RETELL TOOL WEBHOOK — POST /retell-tools/check-availability
 //    The calendar's own settings already restrict hours. The old filter caused
@@ -1207,12 +1301,14 @@ app.post('/retell-tools/check-availability', async (req, res) => {
   const timezone = args.timezone || 'America/New_York';
   const agentId  = body.agent_id || ''; // Retell sends this — used by request_followup later
 
+
   let date = args.date;
   if (!date) {
     const t = new Date(Date.now() + 86400000);
     date = t.toISOString().split('T')[0];
     console.warn(`[check-availability] no date supplied, defaulting to ${date}`);
   }
+
 
   // Returns true if a slot falls between 9am and 7pm in the caller's timezone
   function is9to7(slotTime) {
@@ -1225,6 +1321,7 @@ app.post('/retell-tools/check-availability', async (req, res) => {
     return h >= 9 && h < 19;
   }
 
+
   function fmtSlots(slots, dateStr) {
     const times = slots.slice(0, 3).map(s =>
       new Date(s).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone })
@@ -1233,6 +1330,7 @@ app.post('/retell-tools/check-availability', async (req, res) => {
       ? `On ${dateStr} I have one opening at ${times}. Does that work for you?`
       : `On ${dateStr} I have openings at ${times}. Which of those works best for you?`;
   }
+
 
   try {
     // Fetch a 2-day window in one API call
@@ -1247,30 +1345,36 @@ app.post('/retell-tools/check-availability', async (req, res) => {
       return d.toISOString().split('T')[0];
     })();
 
+
     const startTs = new Date(date).getTime();
     const endTs   = new Date(endDate).getTime();
     const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
       `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
+
 
     const crmRes = await fetch(url, {
       headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15' },
     });
     const data = await crmRes.json();
 
+
     if (!crmRes.ok) {
       return res.json({ result: "I'm having trouble pulling up the calendar right now. Let me have someone follow up with you directly." });
     }
+
 
     const raw1    = (data[date]  && Array.isArray(data[date].slots))  ? data[date].slots  : [];
     const raw2    = (data[day2]  && Array.isArray(data[day2].slots))  ? data[day2].slots  : [];
     const slots1  = raw1.filter(is9to7);
     const slots2  = raw2.filter(is9to7);
 
+
     // ── Day 1 has daytime slots ───────────────────────────────────────────────
     if (slots1.length > 0) {
       const d1Str = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
       return res.json({ result: fmtSlots(slots1, d1Str) });
     }
+
 
     // ── Day 2 has daytime slots ───────────────────────────────────────────────
     if (slots2.length > 0) {
@@ -1285,17 +1389,20 @@ app.post('/retell-tools/check-availability', async (req, res) => {
       return res.json({ result });
     }
 
+
     // ── No daytime slots in either day — hand off to followup ────────────────
     console.log(`[check-availability] No 9-7 slots found for ${date} or ${day2} | agentId: ${agentId}`);
     return res.json({
       result: `It looks like we don't have any openings in the next couple of days during regular hours. Not a problem at all — someone from the Creative Copies team will reach out to set up a time that works for you. Just so they know when to call, what time of day generally works best for you — morning, afternoon, or evening?`
     });
 
+
   } catch (e) {
     console.error('[retell-tools/check-availability] Exception:', e.message);
     return res.json({ result: "I'm having trouble with the calendar right now. Let me have someone reach out to confirm a time." });
   }
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RETELL TOOL WEBHOOK — POST /retell-tools/request-followup
@@ -1414,6 +1521,7 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
   const args = toolArgs(req, 'book-appointment');
   const { firstName, lastName, email, phone = '', startTime, timezone = 'America/New_York' } = args;
 
+
   const missing = [];
   if (!firstName) missing.push('first name');
   if (!lastName)  missing.push('last name');
@@ -1426,12 +1534,15 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
     });
   }
 
+
   try {
     // ── STEP 1: Upsert contact ────────────────────────────────────────
     const contactBody = { locationId: CRM_LOCATION_ID, firstName, lastName, email };
     if (phone) contactBody.phone = phone;
 
+
     console.log('[retell-tools/book-appointment] Upserting contact:', JSON.stringify(contactBody));
+
 
     const contactRes = await fetch(`${CRM_API}/contacts/upsert`, {
       method  : 'POST',
@@ -1443,7 +1554,9 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       body : JSON.stringify(contactBody),
     });
 
+
     const contactData = await contactRes.json();
+
 
     if (!contactRes.ok) {
       console.error('[retell-tools/book-appointment] Contact upsert failed:', JSON.stringify(contactData));
@@ -1451,6 +1564,7 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
         result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
       });
     }
+
 
     const contactId = contactData.contact?.id;
     if (!contactId) {
@@ -1460,7 +1574,9 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       });
     }
 
+
     console.log(`[retell-tools/book-appointment] Contact ready — id: ${contactId}`);
+
 
     // ── STEP 2: Book the appointment using contactId ──────────────────────
     const endTime = (() => {
@@ -1468,6 +1584,7 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       d.setMinutes(d.getMinutes() + 30);
       return d.toISOString();
     })();
+
 
     const apptPayload = {
       calendarId : CRM_CALENDAR_ID,
@@ -1477,7 +1594,9 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       endTime,
     };
 
+
     console.log('[retell-tools/book-appointment] Appointment payload:', JSON.stringify(apptPayload, null, 2));
+
 
     const crmRes = await fetch(`${CRM_API}/calendars/events/appointments`, {
       method  : 'POST',
@@ -1489,7 +1608,9 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       body : JSON.stringify(apptPayload),
     });
 
+
     const data = await crmRes.json();
+
 
     if (!crmRes.ok) {
       console.error('[retell-tools/book-appointment] Appointment failed:', JSON.stringify(data, null, 2));
@@ -1498,15 +1619,18 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       });
     }
 
+
     const timeStr = new Date(startTime).toLocaleString('en-US', {
       weekday : 'long', month: 'long', day: 'numeric',
       hour    : 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
     });
 
+
     console.log(`[retell-tools/book-appointment] ✅ Booked — id: ${data.id || data.appointmentId}`);
     return res.json({
       result   : `You're all booked, ${firstName}! Your discovery call is confirmed for ${timeStr}. The confirmation is on its way to ${email}, and the team will be in touch before the call.`,
     });
+
 
   } catch (e) {
     console.error('[retell-tools/book-appointment] Exception:', e.message);
@@ -1530,6 +1654,7 @@ const NICHE_DEFAULT_TAGLINES = {
   security    : 'Professional security coverage for your site.',
   roadside    : 'Stranded? Help is on the way.'
 };
+
 
 app.get('/demo-config/:slug', async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
@@ -1556,6 +1681,7 @@ app.get('/demo-config/:slug', async (req, res) => {
   }
 });
 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /:slug — serves the demo landing page
 //
@@ -1581,7 +1707,9 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   ];
   if (API_PREFIXES.some(p => slug.startsWith(p))) return next();
 
+
   const EXPIRED_PAGE = '<!doctype html><html><body><h2 style="font-family:sans-serif;padding:40px">This demo has expired or does not exist.</h2></body></html>';
+
 
   let r;
   try {
@@ -1592,9 +1720,11 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   }
   if (!r || r.expired) return res.status(r ? 410 : 404).send(EXPIRED_PAGE);
 
+
   let html;
   try { html = getNicheTemplate(r.niche); }
   catch (e) { return res.status(500).send('Template error'); }
+
 
   // ── Palette ────────────────────────────────────────────────────────
   // Use the stored hex values. Fall back to the same defaults as the
@@ -1607,6 +1737,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   const palette = computePalette(pHex, sHex);
   console.log(`[slug] ${slug} palette: stored p=${r.primary_color} s=${r.secondary_color} -> serving p=#${pHex} s=#${sHex}`);
 
+
   // Build an inline-JS snippet that calls setProperty() on <html> immediately.
   // setProperty() on element.style has the highest specificity possible and
   // cannot be beaten by any stylesheet rule — including the template's
@@ -1614,6 +1745,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   const paletteJs = Object.entries(palette)
     .map(([k, v]) => `d.style.setProperty(${JSON.stringify(k)},${JSON.stringify(v)})`)
     .join(';');
+
 
   // ── DEMO_CONFIG ─────────────────────────────────────────────────────
   const demoConfig = {
@@ -1633,6 +1765,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
     focus          : 'full-service',
   };
 
+
   // Injection goes at the very top of <head> so:
   //   • window.DEMO_CONFIG is set before any template script reads it
   //   • Palette is applied as inline styles (highest priority) before paint
@@ -1644,10 +1777,12 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
 })();
 <\/script>`;
 
+
   html = html.replace('<head>', '<head>' + injected);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.send(html);
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /delete-agent
@@ -1727,16 +1862,19 @@ app.post('/delete-agent', async (req, res) => {
   }
 });
 
+
 // ─── 404 catch-all ────────────────────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
 });
+
 
 // ─── Unhandled error handler ──────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   console.error('[UNHANDLED ERROR]', err);
   res.status(500).json({ error: 'Unexpected server error', message: err.message });
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EXPIRY SWEEP
@@ -1774,6 +1912,7 @@ async function sweepExpired() {
 setInterval(sweepExpired, 60 * 60 * 1000);
 setTimeout(sweepExpired, 30_000);
 
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 db.init()
   .then(() => {
@@ -1788,6 +1927,16 @@ db.init()
       console.log('RAILWAY_PUBLIC_URL: ' + (RAILWAY_PUBLIC_URL || '(not set — optional)'));
       console.log('=====================================\n');
     });
+    // ── Cold email loops ────────────────────────────────────────────────────
+    if (process.env.GOOGLE_SA_GETCREATIVECOPYZ_COM) {
+      setInterval(runSendLoop, 2 * 60 * 1000);
+      setInterval(detectRepliesAndBounces, 20 * 60 * 1000);
+      runSendLoop();
+      detectRepliesAndBounces();
+      console.log('[cold-email] Send loop and reply detector started ✅');
+    } else {
+      console.log('[cold-email] Gmail env vars not set — loops not started');
+    }
   })
   .catch(e => {
     console.error('[boot] database init failed:', e.message);
