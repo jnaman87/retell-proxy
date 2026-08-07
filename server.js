@@ -321,7 +321,7 @@ City: ${city}
 Today's date: ${today}
 
 ## WHAT THIS IS
-You are Emma, an AI voice receptionist demo built by Creative Copyz \u2014 pronounced "Creative Copies".
+You are Emma, an AI voice receptionist demo built by Creative Copies.
 You are showing ${businessName} exactly what their own AI receptionist would sound like.
 You are NOT the real receptionist for ${businessName} and you cannot dispatch their team,
 book their services, or make any real commitments on their behalf.
@@ -329,11 +329,6 @@ book their services, or make any real commitments on their behalf.
 ## IDENTITY
 Your name is Emma. You speak as if you are the receptionist for ${businessName} in ${city}.
 ${tagline ? `Their tagline: "${tagline}"` : ''}
-
-## PRONUNCIATION \u2014 READ CAREFULLY
-The company that built this demo is called Creative Copyz.
-Always say it as "Creative Copies" \u2014 never as "Creative Copi-zee" or any other pronunciation.
-This only comes up if a caller asks who built the demo or who you work for.
 
 ${servicesSection}
 ${faqSection}
@@ -372,8 +367,8 @@ This is not a failure. It is the natural end of the demo.
 
 ## ENDING THE DEMO AND OFFERING THE SETUP CALL
 Stop role-playing and be transparent. In your own words, cover these four points in order:
-1. That is where the demo ends. You are Emma, an AI voice agent Creative Copyz (pronounced "Creative Copies")
-   built to show ${businessName} what this would sound like on their own calls.
+1. That is where the demo ends. You are Emma, an AI voice agent Creative Copies built
+   to show ${businessName} what this would sound like on their own calls.
 2. A real version would go further: taking the booking properly and working with the
    systems ${businessName} already uses.
 3. Offer a short call with the team, so they can work out exactly what needs to be added
@@ -385,7 +380,7 @@ Here is the right length and tone. Adapt it, do not repeat it word for word:
 "That is actually where the demo stops. I am Emma, an AI agent Creative Copies built to
 show you what this would sound like on your own lines. A real version would take that
 booking properly and work with the systems you already use. I can set up a quick call
-with the Creative Copyz team so they can work out exactly what needs adding to make me work for ${businessName}.
+with the Creative Copies team so they can work out exactly what needs adding to make me work for ${businessName}.
 Would you like me to check some times?"
 
 If they say no, thank them warmly and end the call. Do not push.
@@ -523,7 +518,7 @@ Once the reason for the call is resolved, close warmly and end it.
 - Never check the calendar before you know where the caller is based
 - Stay in character as Emma until the demo ends, then be straightforward about being a demo
 - Never merge a doubled letter when spelling. Say "double C", not "C"
-- After the demo ends you are still warm and helpful, just now booking for Creative Copyz ("Creative Copies")
+- After the demo ends you are still warm and helpful, just now booking for Creative Copies
 `.trim();
 }
 
@@ -591,6 +586,80 @@ const cleanBusinessName = (name) => (name || '')
   .replace(/\s{2,}/g, ' ')
   .trim();
 
+// ── CRM custom field write-back ───────────────────────────────────────────────
+// GHL's basic Webhook action cannot map a response back onto the contact, so the
+// server writes the fields itself. Field IDs are looked up once by name and
+// cached, which means the workflow never has to know an ID.
+let crmFieldMap = null;
+
+async function getCrmFieldMap() {
+  if (crmFieldMap) return crmFieldMap;
+  try {
+    const r = await fetch(
+      `${CRM_API}/locations/${CRM_LOCATION_ID}/customFields`,
+      { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
+    );
+    const d = await r.json();
+    if (!r.ok) {
+      console.error('[crm-fields] lookup failed:', JSON.stringify(d));
+      return {};
+    }
+    crmFieldMap = {};
+    for (const f of (d.customFields || d.customField || [])) {
+      if (f.name) crmFieldMap[f.name.trim().toLowerCase()] = f.id;
+      if (f.fieldKey) crmFieldMap[String(f.fieldKey).toLowerCase()] = f.id;
+    }
+    console.log(`[crm-fields] cached ${Object.keys(crmFieldMap).length} field keys`);
+    return crmFieldMap;
+  } catch (e) {
+    console.error('[crm-fields] lookup error:', e.message);
+    return {};
+  }
+}
+
+// values: { "Voice AI Agent ID": "agent_...", "Demo Page URL": "https://..." }
+// Field names must match the CRM exactly, case-insensitively.
+async function updateContactFields(contactId, values) {
+  if (!contactId) {
+    console.warn('[crm-update] no contactId, skipping write-back');
+    return false;
+  }
+
+  const map = await getCrmFieldMap();
+  const customFields = [];
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined || value === null || value === '') continue;
+    const id = map[name.trim().toLowerCase()];
+    if (!id) { console.warn(`[crm-update] no field named "${name}" in this location`); continue; }
+    customFields.push({ id, value: String(value) });
+  }
+
+  if (!customFields.length) {
+    console.warn('[crm-update] nothing to write');
+    return false;
+  }
+
+  try {
+    const r = await fetch(`${CRM_API}/contacts/${contactId}`, {
+      method  : 'PUT',
+      headers : {
+        Authorization  : `Bearer ${CRM_API_KEY}`,
+        Version        : '2021-07-28',
+        'Content-Type' : 'application/json',
+      },
+      body: JSON.stringify({ customFields }),
+    });
+    if (!r.ok) {
+      console.error(`[crm-update] failed (${r.status}):`, await r.text());
+      return false;
+    }
+    console.log(`[crm-update] ✅ ${customFields.length} field(s) written to ${contactId}`);
+    return true;
+  } catch (e) {
+    console.error('[crm-update] error:', e.message);
+    return false;
+  }
+}
 
 // ── orderPalette ───────────────────────────────────────────────────────────────
 // The template uses secondary for the page background (--b0) and primary for the
@@ -871,6 +940,14 @@ app.post('/create-agent', async (req, res) => {
     });
 
     console.log(`[create-agent] ✅ ${slug} → ${agentData.agent_id}`);
+
+    // Write straight back to the contact. Not awaited on the critical path:
+    // a CRM hiccup should not fail an agent that was created successfully.
+    updateContactFields(contactId, {
+      'Voice AI Agent ID' : agentData.agent_id,
+      'Demo Page URL'     : demoUrl,
+      'Website Scraped'   : 'Yes',
+    }).catch(() => {});
     return res.json({
       success   : true,
       agentId   : agentData.agent_id,
@@ -1100,7 +1177,6 @@ app.post('/book-appointment', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RETELL TOOL WEBHOOK — POST /retell-tools/check-availability
-// ✅ FIX 1 (server side): Removed the artificial 9AM-7PM filter.
 //    The calendar's own settings already restrict hours. The old filter caused
 //    Emma to call the tool twice with identical args when a caller asked for
 //    early/evening slots, always getting the same "no regular hours" reply.
@@ -1281,7 +1357,6 @@ app.post('/retell-tools/request-followup', async (req, res) => {
 
   return res.json({
     result: `Got it — I've added a note for the team, and someone will reach out to you to lock in a time for that call. Thanks so much for your time today, and we look forward to speaking with you soon.`,
-    end_call: true,
   });
 });
 
