@@ -37,19 +37,26 @@ function resolveTimezone(city = '') {
 }
 
 router.post('/enroll', async (req, res) => {
-  const { contact_id, email, name, city } = req.body;
+  const {
+    contact_id, email, name, city,
+    niche, company_name, demo_page_url,
+    personalisation_hook, current_pain,
+  } = req.body;
+
   if (!email) return res.status(400).json({ error: 'email required' });
 
   try {
     const tz = resolveTimezone(city);
     await pool.query(
       `INSERT INTO enrollments
-         (contact_id, prospect_email, prospect_name, prospect_city, prospect_tz)
-       VALUES ($1, $2, $3, $4, $5)
+         (contact_id, prospect_email, prospect_name, prospect_city, prospect_tz,
+          niche, company_name, demo_page_url, personalisation_hook, current_pain)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (prospect_email) DO NOTHING`,
-      [contact_id, email.toLowerCase().trim(), name, city, tz]
+      [contact_id, email.toLowerCase().trim(), name, city, tz,
+       niche, company_name, demo_page_url, personalisation_hook, current_pain]
     );
-    console.log(`[enroll] ✅ ${email} enrolled (city: ${city}, tz: ${tz})`);
+    console.log(`[enroll] ✅ ${email} (${niche}) enrolled`);
     return res.json({ ok: true });
   } catch (e) {
     console.error('[enroll] DB error:', e.message);
