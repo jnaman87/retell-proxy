@@ -303,7 +303,11 @@
         };
         Object.keys(vars).forEach(function (key) { document.documentElement.style.setProperty(key, vars[key]); });
       }
-      applyPalette(params.get('primary') || '16A34A', params.get('secondary') || '052E16');
+  var _cfg2 = window.DEMO_CONFIG || {};
+      applyPalette(
+        (_cfg2.primaryColor   || '').replace(/^#/,'') || params.get('primary')   || '16A34A',
+        (_cfg2.secondaryColor || '').replace(/^#/,'') || params.get('secondary') || '052E16'
+      );
       function cleanText(value, fallback) { return value && value.trim() ? value.trim().slice(0, 120) : fallback; }
       function setText(id, value) { var node = document.getElementById(id); if (node) node.textContent = value; }
       var businessName = cleanText(params.get('name'), 'Your Septic Service');
