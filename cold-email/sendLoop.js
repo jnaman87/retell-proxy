@@ -3,9 +3,12 @@ const pool          = require('./pool');
 const { sendEmail } = require('./gmail-sender');
 const SEQUENCES     = require('./sequence');
 
+// Only pick mailboxes under the 2 new-contact daily cap
 async function pickMailbox() {
   const row = await pool.query(
     `SELECT email FROM mailboxes
+     WHERE daily_reset_at < CURRENT_DATE
+        OR daily_count < 2
      ORDER BY last_sent_at NULLS FIRST
      LIMIT 1`
   );
@@ -51,9 +54,16 @@ async function runSendLoop() {
         continue;
       }
 
-      // Pick LRU mailbox
-      const mailbox = await pickMailbox();
-      if (!mailbox) continue;
+      // Step 0: pick a fresh LRU mailbox under daily cap
+      // Steps 1+: always use the same mailbox as step 0
+      const mailbox = enrollment.step === 0
+        ? await pickMailbox()
+        : enrollment.mailbox;
+
+      if (!mailbox) {
+        console.log('[loop] no mailbox available (daily cap reached for all)');
+        continue;
+      }
 
       const subject = template.subject(enrollment);
 
@@ -87,10 +97,24 @@ async function runSendLoop() {
            isDone, String(template.delayDays || 3), enrollment.id]
         );
 
-        await pool.query(
-          `UPDATE mailboxes SET last_sent_at = NOW() WHERE email = $1`,
-          [mailbox]
-        );
+        // Step 0: increment daily cap counter
+        // Steps 1+: just update last_sent_at
+        if (enrollment.step === 0) {
+          await pool.query(
+            `UPDATE mailboxes SET
+               last_sent_at   = NOW(),
+               daily_count    = CASE WHEN daily_reset_at < CURRENT_DATE THEN 1
+                                     ELSE daily_count + 1 END,
+               daily_reset_at = CURRENT_DATE
+             WHERE email = $1`,
+            [mailbox]
+          );
+        } else {
+          await pool.query(
+            `UPDATE mailboxes SET last_sent_at = NOW() WHERE email = $1`,
+            [mailbox]
+          );
+        }
 
       } catch (err) {
         console.error(`[loop] send failed for ${enrollment.prospect_email}:`, err.message);
