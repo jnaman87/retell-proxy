@@ -1223,13 +1223,17 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
       d.setMinutes(d.getMinutes() + 30);
       return d.toISOString();
     })();
-    const payload = {
-      calendarId  : CRM_CALENDAR_ID,
-      locationId  : CRM_LOCATION_ID,
-      contactInfo : { firstName, lastName, email, phone, timezone },
-      startTime,
-      endTime,
-    };
+    const contactInfo = { firstName, lastName, email };
+if (phone) contactInfo.phone = phone;   // only include if non-empty
+
+const payload = {
+  calendarId  : CRM_CALENDAR_ID,
+  locationId  : CRM_LOCATION_ID,
+  contactInfo,
+  startTime,
+  endTime,
+  timezone,   // move to top level — this is the appointment timezone
+};
     const crmRes = await fetch(`${CRM_API}/calendars/events/appointments`, {
       method  : 'POST',
       headers : {
@@ -1241,9 +1245,12 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
     });
     const data = await crmRes.json();
     if (!crmRes.ok) {
-      console.error('[retell-tools/book-appointment] CRM error:', JSON.stringify(data, null, 2));
-      return res.json({ result: "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot." });
-    }
+  console.error('[retell-tools/book-appointment] CRM error:', JSON.stringify(data, null, 2));
+  return res.json({
+    result   : "I ran into an issue completing the booking. Please use the 'Book a Discovery Call' button on the page to lock in your spot.",
+    end_call : true,   // ADD THIS
+  });
+}
     const timeStr = new Date(startTime).toLocaleString('en-US', {
       weekday: 'long', month: 'long', day: 'numeric',
       hour: 'numeric', minute: '2-digit', hour12: true, timeZone: timezone,
