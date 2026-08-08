@@ -66,7 +66,7 @@ async function runSendLoop() {
     );
 
     for (const enrollment of due.rows) {
-      //if (!isInSendWindow(enrollment.prospect_tz)) continue;
+      if (!isInSendWindow(enrollment.prospect_tz)) continue;
 
       const nicheSeq = SEQUENCES[enrollment.niche] || SEQUENCES.restoration;
       const template = nicheSeq[enrollment.step];
