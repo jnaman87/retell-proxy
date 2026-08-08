@@ -6,7 +6,7 @@ const SEQUENCES = {
   restoration: [
     {
       subject  : (e) => `${e.company_name} after hours`,
-      delayDays: 3,
+      delayDays: '5 minutes',
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}A ${e.prospect_city} homeowner standing in six inches of water calls three mitigation companies in about ten minutes. First one to actually pick up gets the job, and the rebuild that follows it.
 
 So I built ${e.company_name} a phone line that always picks up. Her name is Emma. She answers as your company, handles the water, fire, storm and mold calls that come in at 1am, pulls real openings off a live calendar, and books the assessment.
