@@ -6,7 +6,7 @@ const SEQUENCES = {
   restoration: [
     {
       subject  : (e) => `${e.company_name} after hours`,
-      delayDays: '5 minutes',
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}A ${e.prospect_city} homeowner standing in six inches of water calls three mitigation companies in about ten minutes. First one to actually pick up gets the job, and the rebuild that follows it.
 
 So I built ${e.company_name} a phone line that always picks up. Her name is Emma. She answers as your company, handles the water, fire, storm and mold calls that come in at 1am, pulls real openings off a live calendar, and books the assessment.
@@ -69,7 +69,7 @@ Director | Creative Copyz`,
   bailbond: [
     {
       subject  : (e) => `${e.company_name}, 2am`,
-      delayDays: 3,
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Nobody calls a bondsman at a calm moment. They are frightened, it is 2am, and they are working down a list of ${e.prospect_city} bondsmen. Second ring and they are on to the next name.
 
 I built ${e.company_name} a line that answers every one of those. Her name is Emma. She stays calm when the caller is not, walks them through how the process generally works, and books them in off a live calendar.
@@ -128,7 +128,7 @@ Director | Creative Copyz`,
   towing: [
     {
       subject  : (e) => `${e.company_name} dispatch`,
-      delayDays: 3,
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}A driver stuck on the shoulder gives you about 60 seconds before they tap the next number. They are not leaving a voicemail.
 
 I built ${e.company_name} a line that answers on the first ring, every time. Her name is Emma. She works out whether it is a tow, a jump, a flat or a lockout, handles the two questions every caller opens with, and books off a live calendar.
@@ -187,7 +187,7 @@ Director | Creative Copyz`,
   locksmith: [
     {
       subject  : (e) => `${e.company_name} first ring`,
-      delayDays: 3,
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Lockout calls are won on the first ring. Somebody is standing next to their car in a ${e.prospect_city} parking garage and they are calling until somebody answers.
 
 I built ${e.company_name} a line that always does. Her name is Emma. She works out whether it is a car, a house or an office, whether it is a lockout or a rekey, and books the visit off a live calendar.
@@ -246,7 +246,7 @@ Director | Creative Copyz`,
   vet: [
     {
       subject  : (e) => `${e.company_name} after 10pm`,
-      delayDays: 3,
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Somebody in ${e.prospect_city} calls at 11pm because their dog got into something. They are upset and they need a calm voice in under ten seconds.
 
 I built ${e.company_name} a line for exactly those. Her name is Emma. She stays steady while the caller is not, covers what to do on the way in, and books off a live calendar.
@@ -305,7 +305,7 @@ Director | Creative Copyz`,
   funeral: [
     {
       subject  : (e) => `${e.company_name} first call`,
-      delayDays: 3,
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}The first call a family makes is usually within an hour of a death, and it often comes at 3am. Whoever answers sets the tone for everything after.
 
 I built ${e.company_name} a line for those hours. Her name is Emma. She is set to speak slowly and lead with the family before the logistics, then arrange a private consultation with a director rather than pushing anyone through a form.
@@ -362,7 +362,7 @@ Director | Creative Copyz`,
   septic: [
     {
       subject  : (e) => `${e.company_name} emergency line`,
-      delayDays: 3,
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}When there is sewage coming up into a shower on a Sunday night, nobody leaves a voicemail. They call every septic company in ${e.prospect_city} until a person answers.
 
 I built ${e.company_name} a line that answers all of them. Her name is Emma. She works out whether it is a backup, a full tank or a drain field problem, keeps it short because nobody wants a conversation at that moment, and books off a live calendar.
@@ -419,7 +419,7 @@ Director | Creative Copyz`,
   nemt: [
     {
       subject  : (e) => `${e.company_name} scheduling line`,
-      delayDays: 3,
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Two kinds of people call ${e.company_name}. An 80 year old arranging a dialysis ride who needs things repeated twice, and a discharge planner who needs a pickup soon and will call the next provider if you do not pick up.
 
 I built you a line for both. Her name is Emma. She is set to speak at a measured pace, confirm every detail before moving on, and never rush a booking. She checks real availability before she offers anything.
@@ -478,7 +478,7 @@ Director | Creative Copyz`,
   security: [
     {
       subject  : (e) => `${e.company_name} inbound`,
-      delayDays: 3,
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}When a property manager in ${e.prospect_city} calls a security firm, they are already judging you by how the phone gets answered. Usually they are calling because something happened last night, and they are calling three firms.
 
 I built ${e.company_name} a line for those. Her name is Emma. She is consultative rather than pushy, listens to what the site actually needs before proposing anything, and books the site assessment off a live calendar.
@@ -537,7 +537,7 @@ Director | Creative Copyz`,
   roadside: [
     {
       subject  : (e) => `${e.company_name} roadside line`,
-      delayDays: 3,
+      delayDays: 2,
       body: (e) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Somebody sitting on the shoulder outside ${e.prospect_city} gives you about a minute. They want to hear a voice, and if they do not get one they call the next number.
 
 I built ${e.company_name} a line that answers every time. Her name is Emma. She works out whether it is a jump, a flat, a fuel run, a lockout or a light tow, keeps it short, and books off a live calendar.
