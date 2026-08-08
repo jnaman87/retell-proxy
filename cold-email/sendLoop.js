@@ -41,8 +41,7 @@ async function runSendLoop() {
 
     for (const enrollment of due.rows) {
       // Timezone gate — skip if outside 8am–5pm prospect local time
-      // Temporarily disabled for testing
-      // if (!isInSendWindow(enrollment.prospect_tz)) continue;
+      if (!isInSendWindow(enrollment.prospect_tz)) continue;
 
       // Get niche sequence and step template
       const nicheSeq = SEQUENCES[enrollment.niche] || SEQUENCES.restoration;
