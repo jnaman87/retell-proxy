@@ -3,7 +3,35 @@ const pool          = require('./pool');
 const { sendEmail } = require('./gmail-sender');
 const SEQUENCES     = require('./sequence');
 
-// Only pick mailboxes under the 2 new-contact daily cap
+// ─── Mailbox personas ─────────────────────────────────────────────────────────
+const MAILBOX_PERSONAS = {
+  'anne@ccopyz.net'           : { fullName: 'Anne Schull',    title: 'Director of Client Solutions' },
+  'billy@creativecopyz.org'   : { fullName: 'Billy Cooper',   title: 'Business Development Manager' },
+  'caitlyn@creativecopyz.net' : { fullName: 'Caitlyn Smoke',  title: 'Account Executive' },
+  'claire@cretivecopyz.com'   : { fullName: 'Claire Dunphy',  title: 'Partnership Manager' },
+  'clint@ccopyz.com'          : { fullName: 'Clint Mac',      title: 'Head of Business Development' },
+  'emily@cretivecopyz.com'    : { fullName: 'Emily Hathway',  title: 'Client Success Manager' },
+  'glenn@ccopyz.net'          : { fullName: 'Glenn Ponting',  title: 'AI Solutions Director' },
+  'hailey@cretivecopyz.com'   : { fullName: 'Hailey Henz',    title: 'Account Manager' },
+  'harry@ccopyz.org'          : { fullName: 'Harry Garrold',  title: 'Business Development Executive' },
+  'helen@ccopyz.com'          : { fullName: 'Helen Morgan',   title: 'Director of Partnerships' },
+  'james@creativecopyz.net'   : { fullName: 'James Walkway',  title: 'Head of AI Outreach' },
+  'josh@ccopyz.org'           : { fullName: 'Josh Walker',    title: 'Account Executive' },
+  'joshua@creativecopyz.net'  : { fullName: 'Joshua Speed',   title: 'Business Development Lead' },
+  'justin@ccopyz.net'         : { fullName: 'Justin Albus',   title: 'Director of Sales' },
+  'mike@ccopyz.org'           : { fullName: 'Mike Ten',       title: 'Senior Account Manager' },
+  'phil@creativecopyz.org'    : { fullName: 'Phil Jazz',      title: 'Partnership Director' },
+  'samuel@ccopyz.com'         : { fullName: 'Samuel Borne',   title: 'AI Solutions Advisor' },
+  'vanessa@creativecopyz.org' : { fullName: 'Vanessa Cruz',   title: 'Client Relations Manager' },
+};
+
+// Returns persona for the mailbox. Falls back to a generic if mailbox
+// isn't in the map yet (e.g. a new mailbox added but not mapped).
+function getPersona(mailbox) {
+  return MAILBOX_PERSONAS[mailbox] || { fullName: 'Creative Copyz Team', title: 'Account Manager' };
+}
+
+// ─── Mailbox picker ───────────────────────────────────────────────────────────
 async function pickMailbox() {
   const row = await pool.query(
     `SELECT email FROM mailboxes
@@ -15,20 +43,18 @@ async function pickMailbox() {
   return row.rows[0]?.email || null;
 }
 
+// ─── Timezone gate ────────────────────────────────────────────────────────────
 function isInSendWindow(ianaTimezone) {
   try {
-    const hour = parseInt(
-      new Date().toLocaleTimeString('en-GB', {
-        hour: '2-digit', minute: '2-digit', hour12: false, timeZone: ianaTimezone,
-      }).split(':')[0],
-      10
-    );
+    const local = new Date(new Date().toLocaleString('en-US', { timeZone: ianaTimezone }));
+    const hour  = local.getHours();
     return hour >= 8 && hour < 17;
   } catch {
     return false;
   }
 }
 
+// ─── Send loop ────────────────────────────────────────────────────────────────
 async function runSendLoop() {
   try {
     const due = await pool.query(
@@ -40,12 +66,11 @@ async function runSendLoop() {
     );
 
     for (const enrollment of due.rows) {
-      // Timezone gate — skip if outside 8am–5pm prospect local time
       if (!isInSendWindow(enrollment.prospect_tz)) continue;
 
-      // Get niche sequence and step template
       const nicheSeq = SEQUENCES[enrollment.niche] || SEQUENCES.restoration;
       const template = nicheSeq[enrollment.step];
+
       if (!template) {
         await pool.query(
           `UPDATE enrollments SET status = 'completed' WHERE id = $1`,
@@ -54,8 +79,6 @@ async function runSendLoop() {
         continue;
       }
 
-      // Step 0: pick a fresh LRU mailbox under daily cap
-      // Steps 1+: always use the same mailbox as step 0
       const mailbox = enrollment.step === 0
         ? await pickMailbox()
         : enrollment.mailbox;
@@ -65,26 +88,26 @@ async function runSendLoop() {
         continue;
       }
 
+      const persona = getPersona(mailbox);
       const subject = template.subject(enrollment);
+      const body    = template.body(enrollment, persona)
+        + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".';
 
       try {
         const result = await sendEmail({
           mailbox,
-          fromName  : 'Naman from Creative Copyz',
+          fromName  : persona.fullName,
           to        : enrollment.prospect_email,
           subject,
-          body      : template.body(enrollment) + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".',
+          body,
           threadId  : enrollment.thread_id,
           inReplyTo : enrollment.last_message_id,
           references: enrollment.last_message_id,
         });
 
-        const nextStep = enrollment.step + 1;
-        const isDone   = nextStep >= nicheSeq.length;
-
-        // ✅ FIX: build interval string in JS — handles both plain numbers
-        //        ('3' → '3 days') and already-unit strings ('5 minutes' → '5 minutes')
-        const rawDelay     = String(template.delayDays || 3);
+        const nextStep      = enrollment.step + 1;
+        const isDone        = nextStep >= nicheSeq.length;
+        const rawDelay      = String(template.delayDays || 3);
         const delayInterval = /[a-zA-Z]/.test(rawDelay) ? rawDelay : `${rawDelay} days`;
 
         await pool.query(
@@ -102,8 +125,6 @@ async function runSendLoop() {
            isDone, delayInterval, enrollment.id]
         );
 
-        // Step 0: increment daily cap counter
-        // Steps 1+: just update last_sent_at
         if (enrollment.step === 0) {
           await pool.query(
             `UPDATE mailboxes SET
@@ -120,6 +141,8 @@ async function runSendLoop() {
             [mailbox]
           );
         }
+
+        console.log(`[loop] ✅ step ${enrollment.step} sent to ${enrollment.prospect_email} via ${mailbox}`);
 
       } catch (err) {
         console.error(`[loop] send failed for ${enrollment.prospect_email}:`, err.message);
