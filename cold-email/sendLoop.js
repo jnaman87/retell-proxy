@@ -73,7 +73,7 @@ async function runSendLoop() {
           fromName  : 'Naman from Creative Copyz',
           to        : enrollment.prospect_email,
           subject,
-          body      : template.body(enrollment),
+          body      : template.body(enrollment) + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".',
           threadId  : enrollment.thread_id,
           inReplyTo : enrollment.last_message_id,
           references: enrollment.last_message_id,
