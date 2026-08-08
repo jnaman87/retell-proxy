@@ -1737,7 +1737,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   const API_PREFIXES = [
     'demo-config','create-agent','create-web-call',
     'book-appointment','check-availability','check-specific-time',
-    'Delete-agent','retell-tools','stats', ‘webhook’
+    'Delete-agent','retell-tools','stats','webhook',
   ];
   if (API_PREFIXES.some(p => slug.startsWith(p))) return next();
 
