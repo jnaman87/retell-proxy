@@ -1653,6 +1653,14 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
 
 
     console.log(`[retell-tools/book-appointment] ✅ Booked — id: ${data.id || data.appointmentId}`);
+    // Stop cold email sequence if this email is enrolled
+    emailPool.query(
+      `UPDATE enrollments SET status = 'completed'
+       WHERE prospect_email = $1 AND status = 'active'`,
+      [email.toLowerCase().trim()]
+    ).then(r => {
+      if (r.rowCount > 0) console.log(`[book-appointment] ✅ cold email stopped for ${email}`);
+    }).catch(e => console.error('[book-appointment] email stop failed:', e.message));
     return res.json({
       result   : `You're all booked, ${firstName}! Your discovery call is confirmed for ${timeStr}. The confirmation is on its way to ${email}, and the team will be in touch before the call.`,
     });
@@ -1729,7 +1737,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   const API_PREFIXES = [
     'demo-config','create-agent','create-web-call',
     'book-appointment','check-availability','check-specific-time',
-    'delete-agent','retell-tools','stats',
+    'Delete-agent','retell-tools','stats', ‘webhook’,
   ];
   if (API_PREFIXES.some(p => slug.startsWith(p))) return next();
 
@@ -1888,6 +1896,52 @@ app.post('/delete-agent', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /webhook/call-booked
+// Called from CRM workflow when a contact books a call.
+// Stops cold email sequence so no more emails go out to that contact.
+// Body: { "email": "prospect@email.com" }   ← preferred
+//    or { "contactId": "abc123" }            ← fallback
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/webhook/call-booked', async (req, res) => {
+  const raw      = { ...(req.body || {}), ...((req.body && req.body.customData) || {}) };
+  const email    = (raw.email || raw.Email || raw.prospect_email || '').toLowerCase().trim();
+  const contactId = raw.contactId || raw.contact_id || raw.id || '';
+
+  if (!email && !contactId) {
+    return res.status(400).json({ error: 'email or contactId required' });
+  }
+
+  try {
+    let result;
+    if (email) {
+      result = await emailPool.query(
+        `UPDATE enrollments SET status = 'completed'
+         WHERE prospect_email = $1 AND status = 'active'
+         RETURNING prospect_email`,
+        [email]
+      );
+    } else {
+      result = await emailPool.query(
+        `UPDATE enrollments SET status = 'completed'
+         WHERE contact_id = $1 AND status = 'active'
+         RETURNING prospect_email`,
+        [contactId]
+      );
+    }
+
+    if (result.rows.length > 0) {
+      console.log(`[call-booked] ✅ emails stopped for ${result.rows[0].prospect_email}`);
+      return res.json({ success: true, stopped: result.rows[0].prospect_email });
+    } else {
+      console.log(`[call-booked] no active enrollment found for ${email || contactId}`);
+      return res.json({ success: true, stopped: null, note: 'No active enrollment found' });
+    }
+  } catch (e) {
+    console.error('[call-booked] error:', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
 
 // ─── 404 catch-all ────────────────────────────────────────────────────────────
 app.use((req, res) => {
