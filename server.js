@@ -649,10 +649,6 @@ app.get('/stats', async (_req, res) => {
   }
 });
 
-
-app.use(require('./routes/enroll'));
-
-
 const cleanBusinessName = (name) => (name || '')
   // Strip legal entity suffixes (LLC, Inc, Corp, etc.)
   .replace(/[,.]?\s*(LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|Co\.?|Company|Pvt\.?\s*Ltd\.?|LLP|LP|PLLC|PA|PC)\s*\.?$/gi, '')
