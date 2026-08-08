@@ -2,477 +2,581 @@
 
 const SEQUENCES = {
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RESTORATION
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 1. RESTORATION ───────────────────────────────────────────────────────────
   restoration: [
     {
+      subject  : (e) => `${e.company_name} after hours`,
       delayDays: 2,
-      subject: (e) => `Quick question for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}A ${e.prospect_city} homeowner standing in six inches of water calls three mitigation companies in about ten minutes. First one to actually pick up gets the job, and the rebuild that follows it.
 
-I put together an AI voice receptionist demo specifically for ${e.company_name} — it answers calls the way your team would, handles emergency intake, and captures job details around the clock.
+So I built ${e.company_name} a phone line that always picks up. Her name is Emma. She answers as your company, handles the water, fire, storm and mold calls that come in at 1am, pulls real openings off a live calendar, and books the assessment.
 
-You can hear it here: ${e.demo_page_url}
-
-Most restoration companies lose jobs after hours when no one picks up. This fixes that without adding headcount.
-
-Worth a listen?
-
-${persona.fullName}
-${persona.title} | Creative Copyz`,
-    },
-    {
-      delayDays: 2,
-      subject: (e) => `Re: Quick question for ${e.company_name}`,
-      body: (e, persona) => `Hi,
-
-Following up on my last note.
-
-The demo I built for ${e.company_name} handles the calls that slip through — water damage emergencies at 2am, storm surge volume, callers who hang up the moment they hit voicemail.
-
-It qualifies the job, captures contact details, and flags urgency. Same quality every time, regardless of hour.
+It is live for 7 days:
 
 ${e.demo_page_url}
 
-Happy to walk you through how it works if that's easier.
+Call it. Try to trip it up. You get 5 test calls, 10 minutes each.
 
+Not for you? Reply "no" and I will leave you be.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `the day after a storm`,
       delayDays: 2,
-      subject: (e) => `Last note — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `Fair to assume this is another generic bot. Most of them are. Here is the part that is harder to argue with.
 
-One last message.
+On a normal Tuesday your office handles the phone fine. The day after a storm moves through ${e.prospect_city}, forty people call inside two hours, and there is no version of one receptionist that answers all of them. The overflow is where your large losses go.
 
-The AI demo I built for ${e.company_name} handles emergency calls, captures job details, and never misses a lead — even at 3am during a storm.
+This answers every one of them at the same time. No queue, no callback list you work through on Wednesday while somebody else is already drying the building.
 
-If the timing isn't right, no worries at all. The demo is live for a few more days if you'd like to check it out: ${e.demo_page_url}
+It also does not guess. It reads real openings off a live calendar instead of inventing a time, and anything it cannot stand behind on price or arrival it puts to the consultation.
 
+${e.current_pain ? e.current_pain + '\n\n' : ''}The ${e.company_name} line is live for 4 more days:
+
+${e.demo_page_url}
+
+Call it and ask it something ugly.
+
+Best Regards,
+${persona.fullName}
+${persona.title} | Creative Copyz`,
+    },
+    {
+      subject  : () => `closing this out`,
+      body: (e, persona) => `Last email from me, I will not chase.
+
+The line I built for ${e.company_name} shuts off in 2 days and the number stops working.
+
+One large loss that rang out this year would have paid for years of this. That is the whole argument.
+
+Two minutes and you will know if it holds up:
+
+${e.demo_page_url}
+
+Either way, good luck this season.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
   ],
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // BAIL BOND
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 2. BAIL BONDS ─────────────────────────────────────────────────────────────
   bailbond: [
     {
+      subject  : (e) => `${e.company_name}, 2am`,
       delayDays: 2,
-      subject: (e) => `Built a demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Nobody calls a bondsman at a calm moment. They are frightened, it is 2am, and they are working down a list of ${e.prospect_city} bondsmen. Second ring and they are on to the next name.
 
-I put together an AI receptionist demo for ${e.company_name} — it handles inbound calls the way your team would, day or night, without missing a beat.
+I built ${e.company_name} a line that answers every one of those. Her name is Emma. She stays calm when the caller is not, walks them through how the process generally works, and books them in off a live calendar.
 
-Families calling at 2am don't want voicemail. This answers, gathers the details, and keeps them moving.
+Live for 7 days:
 
-Take a listen: ${e.demo_page_url}
+${e.demo_page_url}
 
+Call it the way a scared family member would. 5 test calls, 10 minutes each.
+
+Reply "no" and I am gone.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `it does not give legal advice`,
       delayDays: 2,
-      subject: (e) => `Re: demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `The concern with putting a machine on a bail line is that it says something it should not. Quotes your fee on a specific bond. Promises a release time. Gives legal advice.
 
-Following up on the demo I sent over for ${e.company_name}.
+It does none of those. It explains the standard ten percent and how the process generally works, and everything past that it hands to a licensed agent instead of guessing.
 
-Bail bond calls are time-sensitive — every minute someone sits in a cell is a minute a competitor could answer instead. The AI handles intake instantly, 24/7, and routes urgent cases correctly.
+It also books off a live calendar rather than inventing a time, and it spells the caller's name and email back letter by letter before it confirms anything. That last part is what most people expect a bot to get wrong.
 
-Still live here: ${e.demo_page_url}
+${e.current_pain ? e.current_pain + '\n\n' : ''}Still live for 4 days:
 
-Worth 90 seconds of your time.
+${e.demo_page_url}
 
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
-      delayDays: 2,
-      subject: (e) => `Final note — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      subject  : () => `shutting the line off`,
+      body: (e, persona) => `Last email, then I stop.
 
-Last one from me.
+The ${e.company_name} line expires in 2 days.
 
-The demo I built for ${e.company_name} shows exactly how an AI receptionist handles your after-hours calls — no missed leads, no voicemail drop-offs.
+Between now and then, a few families in ${e.prospect_city} will call somebody at 2am. They call one number, and if it rings out they call another. That is the whole business.
 
-If the timing works: ${e.demo_page_url}
+It is still on until then:
 
+${e.demo_page_url}
+
+Appreciate the time either way.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
   ],
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // TOWING
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 3. TOWING ─────────────────────────────────────────────────────────────────
   towing: [
     {
+      subject  : (e) => `${e.company_name} dispatch`,
       delayDays: 2,
-      subject: (e) => `AI demo built for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}A driver stuck on the shoulder gives you about 60 seconds before they tap the next number. They are not leaving a voicemail.
 
-I built an AI voice receptionist demo for ${e.company_name} — it answers calls, gets the location, and dispatches without anyone lifting a finger.
+I built ${e.company_name} a line that answers on the first ring, every time. Her name is Emma. She works out whether it is a tow, a jump, a flat or a lockout, handles the two questions every caller opens with, and books off a live calendar.
 
-Stranded callers don't wait. If they hit voicemail, they call the next company.
+Live for 7 days:
 
-Hear it here: ${e.demo_page_url}
+${e.demo_page_url}
 
+Call it from your truck. 5 calls, 10 minutes each.
+
+Reply "no" and that is the end of it.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `it does not guess`,
       delayDays: 2,
-      subject: (e) => `Re: AI demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `Fair if you assumed this was another generic bot. Most of them are.
 
-Checking back on the demo I put together for ${e.company_name}.
+This one is tuned for tow calls specifically. It moves fast, it does not over-explain, and it knows a lockout is not a flat tire is not a flatbed job.
 
-It handles call surge during bad weather, late-night breakdowns, and calls that come in while your drivers are already out. Answers in seconds, captures what you need, keeps the job moving.
+What it will not do is guess. It reads openings off a live calendar instead of making a time up, and when a caller pushes for an exact ETA or an exact price it does not have, it says so rather than inventing one. Those stay yours to set.
 
-Demo: ${e.demo_page_url}
+${e.current_pain ? e.current_pain + '\n\n' : ''}Live for 4 more days:
 
+${e.demo_page_url}
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
-      delayDays: 2,
-      subject: (e) => `Last note — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      subject  : () => `wrapping up`,
+      body: (e, persona) => `Last one, I promise.
 
-Last message from me.
+Your demo line goes off in 2 days.
 
-The demo I built for ${e.company_name} is still live if you want to hear how AI handles towing dispatch calls: ${e.demo_page_url}
+Every ring-out is a call that went to whoever was second on the list. You already know what a night of those costs.
 
-No voicemail. No missed jobs.
+Sixty seconds to hear it for yourself:
 
+${e.demo_page_url}
+
+Drive safe.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
   ],
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LOCKSMITH
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 4. LOCKSMITH ──────────────────────────────────────────────────────────────
   locksmith: [
     {
+      subject  : (e) => `${e.company_name} first ring`,
       delayDays: 2,
-      subject: (e) => `Quick demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Lockout calls are won on the first ring. Somebody is standing next to their car in a ${e.prospect_city} parking garage and they are calling until somebody answers.
 
-I put together an AI receptionist demo for ${e.company_name} — it answers lockout calls, gets the address, confirms the job, and keeps the caller calm while your tech is on the way.
+I built ${e.company_name} a line that always does. Her name is Emma. She works out whether it is a car, a house or an office, whether it is a lockout or a rekey, and books the visit off a live calendar.
 
-Locked-out callers call the first number that answers. Make sure that's you.
-
-Demo: ${e.demo_page_url}
-
-${persona.fullName}
-${persona.title} | Creative Copyz`,
-    },
-    {
-      delayDays: 2,
-      subject: (e) => `Re: demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
-
-Following up on the AI demo I built for ${e.company_name}.
-
-It handles after-hours lockouts, car lockouts, commercial calls — whatever comes in. Answers instantly, no hold music, no voicemail. The caller stays on the line and the job gets logged.
+Live for 7 days:
 
 ${e.demo_page_url}
 
+Call it and pretend you are locked out. 5 calls, 10 minutes each.
+
+Not for you? Reply "no".
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `it will not quote you a price`,
       delayDays: 2,
-      subject: (e) => `Last note — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `Your customers have been burned by the $19 lockout ad that turns into $250 on arrival. So the fastest way to lose a call is to sound like that.
 
-One last follow-up.
+This one does not quote. It tells callers your pricing is upfront with no hidden fees, then leaves the actual number to your technician instead of inventing one on the phone. Same with arrival times.
 
-The demo for ${e.company_name} shows how AI handles lockout calls at any hour: ${e.demo_page_url}
+It does not invent openings either. It pulls real availability off a live calendar, then spells the caller's name and email back before it books.
 
-Happy to walk through how it would work for your setup if that's helpful.
+${e.current_pain ? e.current_pain + '\n\n' : ''}Your line is live for 4 more days:
 
+${e.demo_page_url}
+
+Try to make it say something dumb.
+
+Best Regards,
+${persona.fullName}
+${persona.title} | Creative Copyz`,
+    },
+    {
+      subject  : () => `last email`,
+      body: (e, persona) => `The ${e.company_name} demo line expires in 2 days.
+
+The calls you miss do not leave voicemails. They call the next locksmith in ${e.prospect_city} and you never find out it happened.
+
+Last chance to hear how it handles one:
+
+${e.demo_page_url}
+
+Good luck out there.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
   ],
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // VET
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 5. VET ────────────────────────────────────────────────────────────────────
   vet: [
     {
+      subject  : (e) => `${e.company_name} after 10pm`,
       delayDays: 2,
-      subject: (e) => `After-hours demo built for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Somebody in ${e.prospect_city} calls at 11pm because their dog got into something. They are upset and they need a calm voice in under ten seconds.
 
-I built an AI voice receptionist demo for ${e.company_name} — it handles emergency calls with the calm, reassuring tone a pet owner needs at 2am.
+I built ${e.company_name} a line for exactly those. Her name is Emma. She stays steady while the caller is not, covers what to do on the way in, and books off a live calendar.
 
-It gathers the details, explains what to do on the way in, and keeps the caller focused. No hold music. No voicemail.
+Live for 7 days:
 
-Hear it: ${e.demo_page_url}
+${e.demo_page_url}
 
+Call it and give it a hard one. 5 calls, 10 minutes each.
+
+Reply "no" and I will not write again.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `it does not diagnose`,
       delayDays: 2,
-      subject: (e) => `Re: demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `The worry with a machine on a vet line is that it says something clinical it has no business saying. Agreed.
 
-Following up on the demo I put together for ${e.company_name}.
+So it does not diagnose. It sticks to safe pre-arrival guidance: keep the animal calm, do not feed them, drive carefully. Anything past that it puts on your team rather than improvising, and it says so plainly.
 
-A panicked pet owner calling at 3am needs an immediate answer, not voicemail. The AI handles it — stays calm, asks the right questions, and keeps them moving toward your clinic.
+It also stays calm with someone who is crying, which is the part that wears your techs down at 3am. And it books off a live calendar, reading the caller's email back character by character before it confirms.
 
-Demo: ${e.demo_page_url}
+${e.current_pain ? e.current_pain + '\n\n' : ''}Live for 4 more days:
 
+${e.demo_page_url}
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
-      delayDays: 2,
-      subject: (e) => `Last follow-up — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      subject  : () => `last note`,
+      body: (e, persona) => `Last email from me.
 
-Last one from me.
+The line I built for ${e.company_name} shuts off in 2 days.
 
-The demo I built for ${e.company_name} shows how AI handles emergency vet calls around the clock: ${e.demo_page_url}
+Every overnight call that rings out is a family driving to whichever clinic answered instead. And it is one more 3am call your team did not have to absorb.
 
+Still live until then:
+
+${e.demo_page_url}
+
+Thanks for the work you do at hours nobody sees.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
   ],
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // FUNERAL
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 6. FUNERAL ────────────────────────────────────────────────────────────────
   funeral: [
     {
+      subject  : (e) => `${e.company_name} first call`,
       delayDays: 2,
-      subject: (e) => `A demo built for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}The first call a family makes is usually within an hour of a death, and it often comes at 3am. Whoever answers sets the tone for everything after.
 
-I built an AI receptionist demo for ${e.company_name} — designed with the tone and care that families expect when they call in one of their hardest moments.
+I built ${e.company_name} a line for those hours. Her name is Emma. She is set to speak slowly and lead with the family before the logistics, then arrange a private consultation with a director rather than pushing anyone through a form.
 
-Compassionate, unhurried, and always available.
+It is live for 7 days:
 
-You can hear it here: ${e.demo_page_url}
+${e.demo_page_url}
 
+Call it and hear how it holds the room.
+
+If it is not right for you, a one word reply is plenty.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `on whether it feels human`,
       delayDays: 2,
-      subject: (e) => `Re: demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `The only question that matters here is whether it feels human, and you cannot answer that from an email.
 
-Following up on the demo I put together for ${e.company_name}.
+What I can tell you is how it is built. It speaks slowly and it does not rush. It leads with empathy before logistics. It can talk through burial, cremation, memorial and pre-planning at a general level, and the moment the conversation turns to cost or specifics it moves that to a private consultation with your director, where it belongs.
 
-Families calling a funeral home at any hour need to feel heard immediately — not sent to voicemail. The AI handles that first moment with warmth and professionalism, 24/7.
+It will not invent anything about your firm. If it does not know, it says so.
 
-Demo: ${e.demo_page_url}
+${e.current_pain ? e.current_pain + '\n\n' : ''}The line is live for 4 more days:
 
+${e.demo_page_url}
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
-      delayDays: 2,
-      subject: (e) => `Last note — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      subject  : () => `last note from me`,
+      body: (e, persona) => `This is the last email I will send.
 
-One last follow-up.
+The line I set up for ${e.company_name} comes down in 2 days.
 
-If you'd like to hear how AI can handle your after-hours calls with the right tone: ${e.demo_page_url}
+If it is useful, it is useful. If not, I would rather you say so than wonder. It takes a minute to find out:
 
+${e.demo_page_url}
+
+Thank you for the time.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
   ],
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SEPTIC
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 7. SEPTIC ─────────────────────────────────────────────────────────────────
   septic: [
     {
+      subject  : (e) => `${e.company_name} emergency line`,
       delayDays: 2,
-      subject: (e) => `Emergency call handling for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}When there is sewage coming up into a shower on a Sunday night, nobody leaves a voicemail. They call every septic company in ${e.prospect_city} until a person answers.
 
-I built an AI receptionist demo for ${e.company_name} — it handles emergency septic calls, gets the details fast, and keeps the caller calm while your crew gets dispatched.
+I built ${e.company_name} a line that answers all of them. Her name is Emma. She works out whether it is a backup, a full tank or a drain field problem, keeps it short because nobody wants a conversation at that moment, and books off a live calendar.
 
-Sewage emergencies don't wait for business hours.
-
-Demo: ${e.demo_page_url}
-
-${persona.fullName}
-${persona.title} | Creative Copyz`,
-    },
-    {
-      delayDays: 2,
-      subject: (e) => `Re: demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
-
-Following up on the AI demo I put together for ${e.company_name}.
-
-It handles the midnight backup call, the panicked homeowner, the commercial site manager — answers immediately, gets what's needed, keeps things moving. No voicemail, no delays.
+Live for 7 days:
 
 ${e.demo_page_url}
 
+Call it and throw a messy one at it. 5 calls, 10 minutes each.
+
+Reply "no" if this is not for you.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `it keeps it short`,
       delayDays: 2,
-      subject: (e) => `Last follow-up — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `Reasonable to assume this is another generic bot. Most of them are.
 
-Last note from me.
+This one is set to be direct on purpose. A sewage call is not the place for a chatty receptionist, so it gets the facts and moves.
 
-The demo for ${e.company_name} shows how AI handles emergency septic calls 24/7: ${e.demo_page_url}
+It separates a backup from a full tank from a drain field issue. It does not quote a price or a truck time it does not have. And it does not invent an opening: it reads real availability off a live calendar, then confirms the caller's name and email back to them before booking.
 
+${e.current_pain ? e.current_pain + '\n\n' : ''}Live for 4 more days:
+
+${e.demo_page_url}
+
+Best Regards,
+${persona.fullName}
+${persona.title} | Creative Copyz`,
+    },
+    {
+      subject  : () => `last one from me`,
+      body: (e, persona) => `The ${e.company_name} demo line expires in 2 days.
+
+An emergency backup that you answer usually becomes a customer who calls you every three years. The ones that ring out become somebody else's.
+
+Still on until then:
+
+${e.demo_page_url}
+
+Appreciate it either way.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
   ],
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // NEMT
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 8. NEMT ───────────────────────────────────────────────────────────────────
   nemt: [
     {
+      subject  : (e) => `${e.company_name} scheduling line`,
       delayDays: 2,
-      subject: (e) => `Scheduling demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Two kinds of people call ${e.company_name}. An 80 year old arranging a dialysis ride who needs things repeated twice, and a discharge planner who needs a pickup soon and will call the next provider if you do not pick up.
 
-I built an AI receptionist demo for ${e.company_name} — it handles ride booking calls with the patience and clarity your passengers need.
+I built you a line for both. Her name is Emma. She is set to speak at a measured pace, confirm every detail before moving on, and never rush a booking. She checks real availability before she offers anything.
 
-It confirms trip details, vehicle requirements, and handles insurance questions without putting anyone on hold.
+Live for 7 days:
 
-Hear it: ${e.demo_page_url}
+${e.demo_page_url}
 
+Call it as a nervous patient, then as a rushed coordinator. 5 calls, 10 minutes each.
+
+Reply "no" and I will stop.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `it repeats things back`,
       delayDays: 2,
-      subject: (e) => `Re: demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `The obvious objection is that your callers are elderly and a machine will lose them. It is the right thing to worry about.
 
-Following up on the demo I put together for ${e.company_name}.
+So it goes slow deliberately. It confirms details instead of racing through them, and it spells the caller's name back letter by letter and their email back character by character before it books. Someone on a bad phone line gets that twice if they need it.
 
-NEMT scheduling calls are repetitive and time-consuming. The AI handles them consistently — confirms pick-up details, vehicle type, insurance — so your team focuses on dispatch, not intake.
+It also handles being talked over. Interrupt it and it stops, the way a person would, instead of finishing its sentence.
 
-Demo: ${e.demo_page_url}
+${e.current_pain ? e.current_pain + '\n\n' : ''}Live for 4 more days:
 
+${e.demo_page_url}
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
-      delayDays: 2,
-      subject: (e) => `Last note — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      subject  : () => `wrapping this up`,
+      body: (e, persona) => `Last email from me.
 
-One last follow-up.
+Your demo line comes down in 2 days.
 
-The demo I built for ${e.company_name} shows how AI handles NEMT scheduling calls around the clock: ${e.demo_page_url}
+A discharge planner who cannot reach you twice stops trying. They do not complain, they just call the other provider from then on. That is how these contracts leak.
 
+Two minutes to hear how it handles one:
+
+${e.demo_page_url}
+
+Thanks for the time.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
   ],
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SECURITY
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 9. SECURITY ───────────────────────────────────────────────────────────────
   security: [
     {
+      subject  : (e) => `${e.company_name} inbound`,
       delayDays: 2,
-      subject: (e) => `Quick demo built for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}When a property manager in ${e.prospect_city} calls a security firm, they are already judging you by how the phone gets answered. Usually they are calling because something happened last night, and they are calling three firms.
 
-I put together an AI receptionist demo for ${e.company_name} — it handles inbound enquiries for coverage, site assessments, and event security with a professional, consultative tone.
+I built ${e.company_name} a line for those. Her name is Emma. She is consultative rather than pushy, listens to what the site actually needs before proposing anything, and books the site assessment off a live calendar.
 
-It qualifies the lead and sets the stage for your team to close.
-
-Demo: ${e.demo_page_url}
-
-${persona.fullName}
-${persona.title} | Creative Copyz`,
-    },
-    {
-      delayDays: 2,
-      subject: (e) => `Re: demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
-
-Following up on the AI demo I built for ${e.company_name}.
-
-It handles the after-hours call from a business owner who just had an incident and needs coverage fast — answers professionally, gathers site details, and gets the right information to your team.
+Live for 7 days:
 
 ${e.demo_page_url}
 
+Call it as a facility director and see how it holds up. 5 calls, 10 minutes each.
+
+Reply "no" and I am done.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `it listens before it pitches`,
       delayDays: 2,
-      subject: (e) => `Last follow-up — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `The first ring is most of the first impression in your business. A property manager who reaches voicemail at 7am has already learned something about how you run.
 
-Last one from me.
+This one answers like a firm that takes itself seriously. It listens before it proposes anything. It can talk through ongoing coverage, event work, and short notice cover after an incident, and it books the site assessment off a live calendar instead of inventing a time.
 
-The demo for ${e.company_name} is still live if you'd like to hear how AI handles your inbound security enquiries: ${e.demo_page_url}
+What it will not do is quote a rate or promise a start date it cannot stand behind. That stays with you.
 
+${e.current_pain ? e.current_pain + '\n\n' : ''}Live for 4 more days:
+
+${e.demo_page_url}
+
+Best Regards,
+${persona.fullName}
+${persona.title} | Creative Copyz`,
+    },
+    {
+      subject  : () => `closing out`,
+      body: (e, persona) => `Last email.
+
+The line I built for ${e.company_name} expires in 2 days.
+
+One 30-post contract you did not answer for is more than this costs in a year. That is the entire case, and I will leave it there.
+
+It is live until then:
+
+${e.demo_page_url}
+
+Good luck with it.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
   ],
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ROADSIDE
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── 10. ROADSIDE ──────────────────────────────────────────────────────────────
   roadside: [
     {
+      subject  : (e) => `${e.company_name} roadside line`,
       delayDays: 2,
-      subject: (e) => `AI demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `${e.personalisation_hook ? e.personalisation_hook + '\n\n' : ''}Somebody sitting on the shoulder outside ${e.prospect_city} gives you about a minute. They want to hear a voice, and if they do not get one they call the next number.
 
-I built an AI receptionist demo for ${e.company_name} — it handles stranded motorist calls fast, gets the location, confirms the job, and dispatches without delay.
+I built ${e.company_name} a line that answers every time. Her name is Emma. She works out whether it is a jump, a flat, a fuel run, a lockout or a light tow, keeps it short, and books off a live calendar.
 
-Every second a caller waits is a second they might call someone else.
-
-Demo: ${e.demo_page_url}
-
-${persona.fullName}
-${persona.title} | Creative Copyz`,
-    },
-    {
-      delayDays: 2,
-      subject: (e) => `Re: demo for ${e.company_name}`,
-      body: (e, persona) => `Hi,
-
-Checking back on the AI demo I put together for ${e.company_name}.
-
-It handles the flat tire call, the dead battery, the car lockout — answers immediately, gets what's needed, and keeps the job moving. Works at 2am the same as 2pm.
+Live for 7 days:
 
 ${e.demo_page_url}
 
+Call it from the road. 5 calls, 10 minutes each.
+
+Reply "no" and that is the last of me.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
     {
+      subject  : () => `it does not make things up`,
       delayDays: 2,
-      subject: (e) => `Last note — ${e.company_name}`,
-      body: (e, persona) => `Hi,
+      body: (e, persona) => `Most AI phone tools are one generic bot with your name pasted on. Fair to assume this is that.
 
-Last follow-up from me.
+This one is set to move fast, because the caller is stranded and possibly somewhere unsafe. It sorts the service type quickly, jump, flat, fuel, lockout or a light tow, and it does not pad the call.
 
-The AI demo I built for ${e.company_name} handles roadside assistance calls 24/7 — no voicemail, no missed jobs: ${e.demo_page_url}
+It also does not make things up. No invented ETA, no invented price, no invented appointment slot. It reads real availability off a live calendar and confirms the caller's details back before it books.
 
+${e.current_pain ? e.current_pain + '\n\n' : ''}Live for 4 more days:
+
+${e.demo_page_url}
+
+Best Regards,
+${persona.fullName}
+${persona.title} | Creative Copyz`,
+    },
+    {
+      subject  : () => `last from me`,
+      body: (e, persona) => `Last email, then I am out of your inbox.
+
+The ${e.company_name} line goes offline in 2 days.
+
+Every ring-out is a driver who called the next company sixty seconds later. You will never see those in a report, which is what makes them expensive.
+
+One call and you will know:
+
+${e.demo_page_url}
+
+Safe roads.
+
+Best Regards,
 ${persona.fullName}
 ${persona.title} | Creative Copyz`,
     },
