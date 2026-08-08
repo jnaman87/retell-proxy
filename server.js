@@ -1953,16 +1953,19 @@ db.init()
       console.log('RAILWAY_PUBLIC_URL: ' + (RAILWAY_PUBLIC_URL || '(not set — optional)'));
       console.log('=====================================\n');
     });
-    // ── Cold email loops ────────────────────────────────────────────────────
-    if (process.env.GOOGLE_SA_CRETIVECOPYZ_COM) {
-      setInterval(runSendLoop, 2 * 60 * 1000);
-      setInterval(detectRepliesAndBounces, 20 * 60 * 1000);
-      runSendLoop();
-      detectRepliesAndBounces();
-      console.log('[cold-email] Send loop and reply detector started ✅');
-    } else {
-      console.log('[cold-email] Gmail env vars not set — loops not started');
-    }
+    // ── Cold email loops ──────────────────────────────────────────────────────
+const saKeys = Object.keys(process.env).filter(k => k.startsWith('GOOGLE_SA_'));
+console.log('[cold-email] SA keys found:', saKeys.length ? saKeys.join(', ') : '(none)');
+
+if (saKeys.length > 0) {
+  setInterval(runSendLoop, 2 * 60 * 1000);
+  setInterval(detectRepliesAndBounces, 20 * 60 * 1000);
+  runSendLoop();
+  detectRepliesAndBounces();
+  console.log('[cold-email] Send loop and reply detector started ✅');
+} else {
+  console.log('[cold-email] Gmail env vars not set — loops not started');
+}
   })
   .catch(e => {
     console.error('[boot] database init failed:', e.message);
