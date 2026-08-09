@@ -25,11 +25,13 @@ const MAILBOX_PERSONAS = {
   'vanessa@creativecopyz.org' : { fullName: 'Vanessa Cruz',   title: 'Client Relations Manager' },
 };
 
-// Returns persona for the mailbox. Falls back to a generic if mailbox
-// isn't in the map yet (e.g. a new mailbox added but not mapped).
 function getPersona(mailbox) {
   return MAILBOX_PERSONAS[mailbox] || { fullName: 'Creative Copyz Team', title: 'Account Manager' };
 }
+
+// ─── 3-minute drip gap between sends ─────────────────────────────────────────
+const DRIP_DELAY_MS = 3 * 60 * 1000;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ─── Mailbox picker ───────────────────────────────────────────────────────────
 async function pickMailbox() {
@@ -147,6 +149,10 @@ async function runSendLoop() {
       } catch (err) {
         console.error(`[loop] send failed for ${enrollment.prospect_email}:`, err.message);
       }
+
+      // ── 3-minute drip gap before firing the next email ──────────────────────
+      console.log('[loop] waiting 3 min before next send...');
+      await sleep(DRIP_DELAY_MS);
     }
   } catch (err) {
     console.error('[loop] query error:', err.message);
