@@ -1090,6 +1090,176 @@ if (prospectEmail) {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// POST /recreate-agent
+// Rebuilds a Retell LLM + Agent from the existing DB record for a slug.
+// The demo URL the contact already received stays unchanged.
+// Accepts: { slug } OR { demoUrl } in the body.
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/recreate-agent', async (req, res) => {
+  try {
+    const b   = req.body || {};
+    const raw = { ...b, ...(b.customData || {}) };
+
+    // Accept slug directly or extract from a full demo URL
+    let slug = raw.slug || '';
+    const demoUrl = raw.demoUrl || raw['Demo Page URL'] || '';
+    if (!slug && demoUrl) {
+      const m = demoUrl.match(/\/([a-z0-9][a-z0-9-]{2,59})\/?$/i);
+      if (m) slug = m[1];
+    }
+
+    if (!slug) {
+      return res.status(400).json({ error: 'slug or demoUrl is required' });
+    }
+
+    // Look up the existing demo record
+    const existing = await db.getBySlug(slug);
+    if (!existing) {
+      return res.status(404).json({ error: `No demo record found for slug: ${slug}` });
+    }
+
+    const {
+      niche, business_name, city, tagline,
+      core_services, primary_color, secondary_color, contact_id, max_calls,
+    } = existing;
+
+    const RAILWAY_URL = process.env.RAILWAY_PUBLIC_URL;
+    const RETELL_KEY  = process.env.RETELL_API_KEY;
+    const VOICE_ID    = process.env.RETELL_VOICE_ID || 'retell-Cimo';
+
+    // Rebuild system prompt from stored business data
+    const systemPrompt = buildSystemPrompt({
+      niche,
+      businessName : business_name,
+      city,
+      coreServices : core_services,
+      tagline,
+      callerFaqs   : '',  // not stored in DB; will be empty for recreated agents
+    });
+
+    const nicheLabel       = normalizeNiche(niche);
+    const agentDisplayName = `[${nicheLabel}] ${business_name} - ${city}`;
+    const openingLine      = (NICHE_TEMPLATES[nicheLabel] || NICHE_TEMPLATES.restoration)
+      .openingLine.replace('{businessName}', business_name);
+
+    // ── Create new Retell LLM ─────────────────────────────────────────────────
+    const llmRes = await fetch('https://api.retellai.com/create-retell-llm', {
+      method  : 'POST',
+      headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
+      body    : JSON.stringify({
+        model                 : 'gpt-4.1',
+        model_high_priority   : true,
+        model_temperature     : 0,
+        tool_call_strict_mode : true,
+        begin_message         : openingLine,
+        general_prompt        : systemPrompt,
+        general_tools: [
+          {
+            type                         : 'custom',
+            name                         : 'check_availability',
+            description                  : 'Check available appointment slots. Call this whenever the caller wants to book or asks about available times. After calling this tool, speak the result immediately — do not wait for the caller to say anything.',
+            speak_during_execution       : true,
+            speak_after_execution        : true,
+            execution_message_description: 'Tell the caller you are checking available times for them, e.g. "Let me check what times we have available for you."',
+            url                          : `${RAILWAY_URL}/retell-tools/check-availability`,
+            parameters: {
+              type: 'object',
+              properties: {
+                date     : { type: 'string', description: 'The calendar date to check, formatted as YYYY-MM-DD.' },
+                timezone : { type: 'string', description: 'IANA timezone derived from the location the caller gave you.' },
+              },
+              required: ['date', 'timezone'],
+            },
+          },
+          {
+            type                         : 'custom',
+            name                         : 'book_appointment',
+            description                  : 'Book a confirmed appointment slot. Only call this after the caller has confirmed their first name, last name, email, and chosen time slot.',
+            speak_during_execution       : true,
+            speak_after_execution        : true,
+            execution_message_description: 'Tell the caller you are booking that slot now, e.g. "Perfect, booking that for you now."',
+            url                          : `${RAILWAY_URL}/retell-tools/book-appointment`,
+            parameters: {
+              type: 'object',
+              properties: {
+                firstName : { type: 'string', description: "Caller's first name, confirmed and spelled back" },
+                lastName  : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
+                email     : { type: 'string', description: "Caller's email address, confirmed character by character" },
+                startTime : { type: 'string', description: 'ISO 8601 datetime string of the selected slot' },
+                timezone  : { type: 'string', description: 'IANA timezone of the caller' },
+              },
+              required: ['firstName', 'lastName', 'email', 'startTime'],
+            },
+          },
+          {
+            type                         : 'custom',
+            name                         : 'request_followup',
+            description                  : "Call this tool ONLY when check_availability has already told the caller there are no openings in the next 2 days and has asked what time of day works best. Pass the caller's answer as preferredTime.",
+            speak_during_execution       : true,
+            speak_after_execution        : true,
+            execution_message_description: 'Tell the caller you are noting their preferred time, e.g. "Perfect, I will make sure the team knows that."',
+            url                          : `${RAILWAY_URL}/retell-tools/request-followup`,
+            parameters: {
+              type: 'object',
+              properties: {
+                preferredTime : { type: 'string', description: 'The time of day the caller prefers for a follow-up call.' },
+                timezone      : { type: 'string', description: 'IANA timezone of the caller.' },
+              },
+              required: ['preferredTime'],
+            },
+          },
+        ],
+      }),
+    });
+
+    if (!llmRes.ok) throw new Error(`LLM creation failed: ${await llmRes.text()}`);
+    const llmData = await llmRes.json();
+
+    // ── Create new Retell Agent ──────────────────────────────────────────────
+    const agentRes = await fetch('https://api.retellai.com/create-agent', {
+      method  : 'POST',
+      headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
+      body    : JSON.stringify({
+        response_engine          : { type: 'retell-llm', llm_id: llmData.llm_id },
+        agent_name               : agentDisplayName,
+        voice_id                 : VOICE_ID,
+        language                 : 'en-US',
+        responsiveness           : 1,
+        interruption_sensitivity : 1,
+        enable_backchannel       : true,
+        backchannel_frequency    : 0.8,
+        backchannel_words        : ['got it', 'sure', 'okay', 'absolutely'],
+        ambient_sound            : 'coffee-shop',
+        ambient_sound_volume     : 0.1,
+        reminder_trigger_ms      : 10000,
+        reminder_max_count       : 2,
+      }),
+    });
+
+    if (!agentRes.ok) throw new Error(`Agent creation failed: ${await agentRes.text()}`);
+    const agentData = await agentRes.json();
+
+    // ── Update DB record in-place (same slug, same demo URL) ──────────────────
+    await db.rebuildDemo(slug, agentData.agent_id, llmData.llm_id);
+
+    const DEMO_BASE = process.env.DEMO_BASE_URL || 'https://demo.creativecopyz.com';
+    console.log(`[recreate-agent] ✅ ${slug} → ${agentData.agent_id}`);
+
+    return res.json({
+      success  : true,
+      slug,
+      agentId  : agentData.agent_id,
+      llmId    : llmData.llm_id,
+      demoUrl  : `${DEMO_BASE}/${slug}`,
+    });
+
+  } catch (error) {
+    console.error('[recreate-agent] error:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /create-web-call
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/create-web-call', async (req, res) => {
