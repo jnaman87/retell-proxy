@@ -183,3 +183,27 @@ module.exports = {
   listExpiredUndeleted, markAgentDeleted, stats,
   pool,
 };
+
+// ─── Rebuild demo (used by /recreate-agent) ─────────────────────────────────
+// Updates agent_id + llm_id for an existing slug in-place.
+// Resets agent_deleted_at, calls_used, and extends expires_at so the
+// demo URL the contact already has becomes live again immediately.
+async function rebuildDemo(slug, agentId, llmId) {
+  await pool.query(`
+    UPDATE demos SET
+      agent_id         = $2,
+      llm_id           = $3,
+      agent_deleted_at = NULL,
+      calls_used       = 0,
+      expires_at       = NOW() + ($4 || ' days')::interval
+    WHERE slug = $1
+  `, [slug, agentId, llmId, String(DEMO_LIFE_DAYS)]);
+}
+
+// ─── exports ────────────────────────────────────────────────────────────────
+module.exports = {
+  init, slugTaken, createDemo, getBySlug, getByAgentId, rebuildDemo,  // rebuildDemo is new
+  reserveCall, releaseCall,
+  listExpiredUndeleted, markAgentDeleted, stats,
+  pool,
+};
