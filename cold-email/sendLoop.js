@@ -33,8 +33,11 @@ function getPersona(mailbox) {
 const DRIP_DELAY_MS = 3 * 60 * 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// ─── IST date helper (resets at midnight IST = 18:30 UTC prev day) ────────────
+// ─── IST date helper (resets at midnight IST) ─────────────────────────────────
 const IST_DATE_SQL = `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE`;
+
+// ─── Concurrency guard ────────────────────────────────────────────────────────
+let loopRunning = false;
 
 // ─── Mailbox picker ───────────────────────────────────────────────────────────
 async function pickMailbox() {
@@ -61,6 +64,12 @@ function isInSendWindow(ianaTimezone) {
 
 // ─── Send loop ────────────────────────────────────────────────────────────────
 async function runSendLoop() {
+  if (loopRunning) {
+    console.log('[loop] previous run still in progress, skipping');
+    return;
+  }
+  loopRunning = true;
+
   try {
     const due = await pool.query(
       `SELECT * FROM enrollments
@@ -149,16 +158,18 @@ async function runSendLoop() {
 
         console.log(`[loop] ✅ step ${enrollment.step} sent to ${enrollment.prospect_email} via ${mailbox}`);
 
+        // ── 3-minute drip gap after every successful send ────────────────────
+        console.log('[loop] waiting 3 min before next send...');
+        await sleep(DRIP_DELAY_MS);
+
       } catch (err) {
         console.error(`[loop] send failed for ${enrollment.prospect_email}:`, err.message);
       }
-
-      // ── 3-minute drip gap before firing the next email ──────────────────────
-      console.log('[loop] waiting 3 min before next send...');
-      await sleep(DRIP_DELAY_MS);
     }
   } catch (err) {
     console.error('[loop] query error:', err.message);
+  } finally {
+    loopRunning = false;
   }
 }
 
