@@ -33,11 +33,14 @@ function getPersona(mailbox) {
 const DRIP_DELAY_MS = 3 * 60 * 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// ─── IST date helper (resets at midnight IST = 18:30 UTC prev day) ────────────
+const IST_DATE_SQL = `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE`;
+
 // ─── Mailbox picker ───────────────────────────────────────────────────────────
 async function pickMailbox() {
   const row = await pool.query(
     `SELECT email FROM mailboxes
-     WHERE daily_reset_at < CURRENT_DATE
+     WHERE daily_reset_at < ${IST_DATE_SQL}
         OR daily_count < 2
      ORDER BY last_sent_at NULLS FIRST
      LIMIT 1`
@@ -131,9 +134,9 @@ async function runSendLoop() {
           await pool.query(
             `UPDATE mailboxes SET
                last_sent_at   = NOW(),
-               daily_count    = CASE WHEN daily_reset_at < CURRENT_DATE THEN 1
+               daily_count    = CASE WHEN daily_reset_at < ${IST_DATE_SQL} THEN 1
                                      ELSE daily_count + 1 END,
-               daily_reset_at = CURRENT_DATE
+               daily_reset_at = ${IST_DATE_SQL}
              WHERE email = $1`,
             [mailbox]
           );
