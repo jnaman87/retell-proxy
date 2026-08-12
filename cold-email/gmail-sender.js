@@ -1,21 +1,5 @@
 'use strict';
 
-/**
- * Creative Copyz — Gmail sender
- *
- * Sends cold sequence email through the mailboxes themselves, via the Gmail
- * API with domain-wide delegation. Mail leaves Google's IPs, so the warmup
- * already built on these mailboxes applies.
- *
- * Install: npm i google-auth-library
- *
- * Env:
- *   GOOGLE_SA_<TENANT>  JSON service account key, one per Workspace tenant.
- *                       TENANT is the domain with dots and dashes replaced by
- *                       underscores and uppercased, e.g.
- *                       getcreativecopyz.com -> GOOGLE_SA_GETCREATIVECOPYZ_COM
- */
-
 const { JWT } = require('google-auth-library');
 
 const SCOPES = [
@@ -25,7 +9,6 @@ const SCOPES = [
 
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
-// One JWT client per mailbox, cached. Tokens refresh themselves.
 const clients = {};
 
 function tenantEnvKey(mailbox) {
@@ -51,7 +34,7 @@ function getClient(mailbox) {
     email  : key.client_email,
     key    : key.private_key,
     scopes : SCOPES,
-    subject: mailbox,          // impersonate this mailbox
+    subject: mailbox,
   });
   return clients[mailbox];
 }
@@ -74,13 +57,7 @@ async function gmailFetch(mailbox, path, options = {}) {
   return text ? JSON.parse(text) : {};
 }
 
-// ─── MIME ────────────────────────────────────────────────────────────────────
-// Plain text only. No HTML alternative, no images, no tracking pixel. Anything
-// else raises the spam score and contradicts the "a person typed this" framing.
-
 function encodeHeader(value) {
-  // RFC 2047 encode only when the header contains non-ASCII, so ordinary
-  // subjects stay human-readable in the raw message.
   return /^[\x20-\x7E]*$/.test(value)
     ? value
     : `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
@@ -96,9 +73,6 @@ function buildMime({ fromName, fromEmail, to, subject, body, inReplyTo, referenc
     'Content-Transfer-Encoding: 8bit',
   ];
 
-  // Threading. Both headers are needed: In-Reply-To for direct parentage,
-  // References for the full chain. Without them Gmail may split the thread
-  // even when threadId is supplied.
   if (inReplyTo)  headers.push(`In-Reply-To: ${inReplyTo}`);
   if (references) headers.push(`References: ${references}`);
 
@@ -109,14 +83,6 @@ function buildMime({ fromName, fromEmail, to, subject, body, inReplyTo, referenc
     .replace(/=+$/, '');
 }
 
-/**
- * Send one email.
- * Pass threadId + inReplyTo + references for follow-ups so they land in the
- * same conversation as the first touch.
- *
- * Returns { id, threadId, messageId } where messageId is the RFC822
- * Message-ID header, which the NEXT follow-up needs.
- */
 async function sendEmail({
   mailbox, fromName, to, subject, body,
   threadId = null, inReplyTo = null, references = null,
@@ -127,12 +93,29 @@ async function sendEmail({
 
   const payload = threadId ? { raw, threadId } : { raw };
 
-  const sent = await gmailFetch(mailbox, '/messages/send', {
-    method: 'POST',
-    body  : JSON.stringify(payload),
-  });
+  let sent;
+  try {
+    sent = await gmailFetch(mailbox, '/messages/send', {
+      method: 'POST',
+      body  : JSON.stringify(payload),
+    });
+  } catch (err) {
+    // ── Thread no longer exists — retry as a fresh standalone email ──────────
+    if (err.message.includes('(404)') && threadId) {
+      console.warn(`[gmail] thread ${threadId} not found — retrying as fresh email to ${to}`);
+      const freshRaw = buildMime({
+        fromName, fromEmail: mailbox, to, subject, body,
+        // intentionally no inReplyTo / references
+      });
+      sent = await gmailFetch(mailbox, '/messages/send', {
+        method: 'POST',
+        body  : JSON.stringify({ raw: freshRaw }),
+      });
+    } else {
+      throw err; // any other error bubbles up as normal
+    }
+  }
 
-  // Read back the Message-ID Gmail assigned. Needed to thread the next email.
   const meta = await gmailFetch(
     mailbox,
     `/messages/${sent.id}?format=metadata&metadataHeaders=Message-ID`
@@ -149,12 +132,6 @@ async function sendEmail({
   };
 }
 
-// ─── Inbound ─────────────────────────────────────────────────────────────────
-/**
- * Recent inbox activity for one mailbox. One API call plus one per message.
- * Match threadId against your active enrollments to detect replies, and check
- * `bounced` to catch delivery failures.
- */
 async function listRecentInbound(mailbox, { days = 3, max = 50 } = {}) {
   const q    = encodeURIComponent(`in:inbox newer_than:${days}d`);
   const list = await gmailFetch(mailbox, `/messages?q=${q}&maxResults=${max}`);
@@ -180,7 +157,6 @@ async function listRecentInbound(mailbox, { days = 3, max = 50 } = {}) {
         from,
         subject  : get('subject'),
         snippet  : msg.snippet || '',
-        // Delivery failures come back from the postmaster, not the prospect.
         bounced  : /mailer-daemon|postmaster/.test(from),
       });
     } catch (e) {
@@ -190,9 +166,6 @@ async function listRecentInbound(mailbox, { days = 3, max = 50 } = {}) {
   return out;
 }
 
-// ─── Preflight ───────────────────────────────────────────────────────────────
-// Run once after setup. Proves delegation works for every mailbox before you
-// discover a broken one mid-campaign.
 async function verifyMailbox(mailbox) {
   try {
     const p = await gmailFetch(mailbox, '/profile?fields=emailAddress,messagesTotal');
