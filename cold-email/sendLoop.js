@@ -29,15 +29,22 @@ function getPersona(mailbox) {
   return MAILBOX_PERSONAS[mailbox] || { fullName: 'Creative Copyz Team', title: 'Account Manager' };
 }
 
-// ─── 3-minute drip gap between sends ─────────────────────────────────────────
+// ─── Drip gap ─────────────────────────────────────────────────────────────────
 const DRIP_DELAY_MS = 3 * 60 * 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// ─── IST date helper (resets at midnight IST) ─────────────────────────────────
+// ─── IST date helper ──────────────────────────────────────────────────────────
 const IST_DATE_SQL = `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE`;
 
+function todayIST() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD
+}
+
 // ─── Concurrency guard ────────────────────────────────────────────────────────
-let loopRunning = false;
+let loopRunning  = false;
+
+// ─── Daily cap tracker (resets automatically at midnight IST) ─────────────────
+let capHitIST = null; // IST date string on which cap was exhausted
 
 // ─── Mailbox picker ───────────────────────────────────────────────────────────
 async function pickMailbox() {
@@ -56,7 +63,7 @@ function isInSendWindow(ianaTimezone) {
   try {
     const local = new Date(new Date().toLocaleString('en-US', { timeZone: ianaTimezone }));
     const hour  = local.getHours();
-    return hour >= 8 && hour < 17;
+    return hour >= 8 && hour < 18;
   } catch {
     return false;
   }
@@ -80,7 +87,7 @@ async function runSendLoop() {
     );
 
     for (const enrollment of due.rows) {
-     if (!isInSendWindow(enrollment.prospect_tz)) continue;
+      if (!isInSendWindow(enrollment.prospect_tz)) continue;
 
       const nicheSeq = SEQUENCES[enrollment.niche] || SEQUENCES.restoration;
       const template = nicheSeq[enrollment.step];
@@ -93,13 +100,21 @@ async function runSendLoop() {
         continue;
       }
 
-      const mailbox = enrollment.step === 0
-        ? await pickMailbox()
-        : enrollment.mailbox;
-
-      if (!mailbox) {
-        console.log('[loop] no mailbox available (daily cap reached for all)');
-        continue;
+      let mailbox;
+      if (enrollment.step === 0) {
+        // ── Skip new leads if cap was already exhausted today ────────────────
+        if (capHitIST === todayIST()) {
+          console.log('[loop] daily cap exhausted for today, skipping new lead');
+          continue;
+        }
+        mailbox = await pickMailbox();
+        if (!mailbox) {
+          capHitIST = todayIST();
+          console.log('[loop] no mailbox available — daily cap reached, will retry tomorrow at midnight IST');
+          continue;
+        }
+      } else {
+        mailbox = enrollment.mailbox;
       }
 
       const persona = getPersona(mailbox);
