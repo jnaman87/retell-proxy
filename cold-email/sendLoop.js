@@ -76,7 +76,7 @@ async function runSendLoop() {
        WHERE status = 'active'
          AND next_send_at <= NOW()
        ORDER BY next_send_at ASC
-       LIMIT 20`
+       LIMIT 6`
     );
 
     for (const enrollment of due.rows) {
