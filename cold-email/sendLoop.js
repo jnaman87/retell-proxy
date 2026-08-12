@@ -40,6 +40,16 @@ function todayIST() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD
 }
 
+// ─── Field sanitizer (blank-safe for nullable fields) ─────────────────────────
+function sanitizeField(value) {
+  if (value === null || value === undefined) return '';
+  const v = String(value).trim();
+  if (!v) return '';
+  // Treat "empty-like" phrases as blank
+  if (/^(none|n\/a|no\s|not\s|nothing|unavailable)/i.test(v)) return '';
+  return v;
+}
+
 // ─── Concurrency guard ────────────────────────────────────────────────────────
 let loopRunning  = false;
 
@@ -118,9 +128,14 @@ async function runSendLoop() {
       }
 
       const persona = getPersona(mailbox);
-      const subject = template.subject(enrollment);
-      const body    = template.body(enrollment, persona)
-        + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".';
+const e = {
+  ...enrollment,
+  personalisation_hook : sanitizeField(enrollment.personalisation_hook),
+  current_pain         : sanitizeField(enrollment.current_pain),
+};
+const subject = template.subject(e);
+const body    = template.body(e, persona)
+  + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".';
 
       try {
         const result = await sendEmail({
