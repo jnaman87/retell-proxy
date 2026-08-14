@@ -2137,11 +2137,11 @@ app.post('/webhook/call-booked', async (req, res) => {
 
 // ─── ONE-TIME: Patch webhook URL onto all active Retell agents ────────────────
 app.get('/admin/patch-webhooks', async (_req, res) => {
-  const WEBHOOK_URL = `${RAILWAY_URL}/webhook/retell-call-ended`;
+  const WEBHOOK_URL = `${RAILWAY_PUBLIC_URL}/webhook/retell-call-ended`;
   const results = { success: [], failed: [] };
 
   try {
-    const { rows } = await db.pool.query(
+    const { rows } = await emailPool.query(
       `SELECT agent_id, slug, business_name 
        FROM demos 
        WHERE agent_deleted_at IS NULL 
@@ -2183,7 +2183,6 @@ app.get('/admin/patch-webhooks', async (_req, res) => {
     return res.status(500).json({ error: e.message });
   }
 });
-
 // ─── 404 catch-all ────────────────────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
