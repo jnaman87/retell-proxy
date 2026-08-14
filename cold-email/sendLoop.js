@@ -37,24 +37,23 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const IST_DATE_SQL = `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE`;
 
 function todayIST() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
-// ─── Field sanitizer (blank-safe for nullable fields) ─────────────────────────
+// ─── Field sanitizer ──────────────────────────────────────────────────────────
 function sanitizeField(value) {
   if (value === null || value === undefined) return '';
   const v = String(value).trim();
   if (!v) return '';
-  // Treat "empty-like" phrases as blank
   if (/^(none|n\/a|no\s|not\s|nothing|unavailable)/i.test(v)) return '';
   return v;
 }
 
 // ─── Concurrency guard ────────────────────────────────────────────────────────
-let loopRunning  = false;
+let loopRunning = false;
 
-// ─── Daily cap tracker (resets automatically at midnight IST) ─────────────────
-let capHitIST = null; // IST date string on which cap was exhausted
+// ─── Daily cap tracker ────────────────────────────────────────────────────────
+let capHitIST = null;
 
 // ─── Mailbox picker ───────────────────────────────────────────────────────────
 async function pickMailbox() {
@@ -110,9 +109,17 @@ async function runSendLoop() {
         continue;
       }
 
+      // ── Mailbox selection ──────────────────────────────────────────────────
       let mailbox;
-      if (enrollment.step === 0) {
-        // ── Skip new leads if cap was already exhausted today ────────────────
+      if (enrollment.niche === 'warm') {
+        // Warm: always use pre-assigned mailbox, bypass daily cap entirely
+        mailbox = enrollment.mailbox;
+        if (!mailbox) {
+          console.log(`[loop] warm enrollment ${enrollment.id} has no mailbox assigned — skipping`);
+          continue;
+        }
+      } else if (enrollment.step === 0) {
+        // Cold step 0: pick a fresh mailbox, respect daily cap
         if (capHitIST === todayIST()) {
           console.log('[loop] daily cap exhausted for today, skipping new lead');
           continue;
@@ -124,18 +131,19 @@ async function runSendLoop() {
           continue;
         }
       } else {
+        // Cold follow-ups: stay on the same mailbox
         mailbox = enrollment.mailbox;
       }
 
       const persona = getPersona(mailbox);
-const e = {
-  ...enrollment,
-  personalisation_hook : sanitizeField(enrollment.personalisation_hook),
-  current_pain         : sanitizeField(enrollment.current_pain),
-};
-const subject = template.subject(e);
-const body    = template.body(e, persona)
-  + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".';
+      const e = {
+        ...enrollment,
+        personalisation_hook: sanitizeField(enrollment.personalisation_hook),
+        current_pain:         sanitizeField(enrollment.current_pain),
+      };
+      const subject = template.subject(e);
+      const body    = template.body(e, persona)
+        + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".';
 
       try {
         const result = await sendEmail({
@@ -169,7 +177,8 @@ const body    = template.body(e, persona)
            isDone, delayInterval, enrollment.id]
         );
 
-        if (enrollment.step === 0) {
+        // ── Mailbox stats: daily_count only for cold step 0 ───────────────────
+        if (enrollment.step === 0 && enrollment.niche !== 'warm') {
           await pool.query(
             `UPDATE mailboxes SET
                last_sent_at   = NOW(),
@@ -188,7 +197,7 @@ const body    = template.body(e, persona)
 
         console.log(`[loop] ✅ step ${enrollment.step} sent to ${enrollment.prospect_email} via ${mailbox}`);
 
-        // ── 3-minute drip gap after every successful send ────────────────────
+        // ── 3-minute drip gap ──────────────────────────────────────────────────
         console.log('[loop] waiting 3 min before next send...');
         await sleep(DRIP_DELAY_MS);
 
