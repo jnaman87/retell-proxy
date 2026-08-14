@@ -582,6 +582,65 @@ ${persona.title} | Creative Copyz`,
     },
   ],
 
+  // ── 11. WARM SEQUENCE ─────────────────────────────────────────────────────────
+  // Triggered when a prospect tests the Retell demo (call > 15s).
+  // Uses pre-assigned cold mailbox — bypasses daily cap.
+  // Sign-off: always "Head of Business Development | Creative Copyz"
+  // Email 1 preview: "curious what you thought"
+  // Email 2 preview: "the demo line is still live if you want to try it again"
+  // Email 3 preview: "closing the loop on {company_name}"
+  // ─────────────────────────────────────────────────────────────────────────────
+  warm: [
+    {
+      subject  : () => `how was Emma`,
+      delayDays: 2,
+      body: (e, persona) => `curious what you thought.
+
+you gave Emma a call — most people are surprised how naturally she handles everything, from fielding questions after-hours to booking jobs on the spot. anything stand out?
+
+if you're open to it, I'd love to get on a quick 15-min call and walk you through what this looks like inside ${e.company_name}'s operation.
+
+just reply here and we'll find a time.
+
+Best Regards,
+${persona.fullName}
+Head of Business Development | Creative Copyz`,
+    },
+    {
+      subject  : () => `still thinking it over`,
+      delayDays: 2,
+      body: (e, persona) => `still thinking it over — the demo line is still live if you want to try it again:
+
+${e.demo_page_url}
+
+a couple of things that usually come up:
+
+"does it actually sound human?" — Emma was built for this. she handles the back-and-forth naturally, knows when to escalate, and doesn't drop calls.
+
+"what if it can't answer something?" — she captures the lead and flags it. nothing slips through.
+
+if you're ready to see how this fits ${e.company_name}, just reply and we'll make it happen.
+
+Best Regards,
+${persona.fullName}
+Head of Business Development | Creative Copyz`,
+    },
+    {
+      subject  : () => `last one from me`,
+      body: (e, persona) => `closing the loop on ${e.company_name}.
+
+if AI voice is something you'd want to move forward with, you can grab a time here:
+
+${process.env.WARM_BOOKING_LINK || ''}
+
+if the timing's not right, no worries at all. appreciate you taking the time to try Emma.
+
+Best Regards,
+${persona.fullName}
+Head of Business Development | Creative Copyz`,
+    },
+  ],
+
 };
 
 module.exports = SEQUENCES;
