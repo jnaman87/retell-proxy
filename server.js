@@ -19,7 +19,7 @@ const fetch    = require('node-fetch'); // v2 — CommonJS compatible
 const path     = require('path');
 const fs       = require('fs');
 const db       = require('./db');
-const pool = require('./pool');
+const pool = require('./cold-email/pool');
 // ── Cold email ───────────────────────────────────────────────────────────────
 const { runSendLoop }           = require('./cold-email/sendLoop');
 const { detectRepliesAndBounces } = require('./cold-email/replyDetector');
