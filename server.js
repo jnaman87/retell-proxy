@@ -1023,7 +1023,8 @@ app.post('/create-agent', async (req, res) => {
         ambient_sound            : 'coffee-shop',
         ambient_sound_volume     : 0.1,
         reminder_trigger_ms      : 10000,
-        reminder_max_count       : 2
+        reminder_max_count       : 2,
+        webhook_url : `https://retell-proxy-production.up.railway.app/webhook/retell-call-ended`,
       })
     });
 
@@ -1257,6 +1258,7 @@ app.post('/recreate-agent', async (req, res) => {
         ambient_sound_volume     : 0.1,
         reminder_trigger_ms      : 10000,
         reminder_max_count       : 2,
+        webhook_url : `https://retell-proxy-production.up.railway.app/webhook/retell-call-ended`,
       }),
     });
 
