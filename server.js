@@ -2135,6 +2135,47 @@ app.post('/webhook/call-booked', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// POST /webhook/retell-call-ended
+// ─────────────────────────────────────────────────────────────────────────
+app.post('/webhook/retell-call-ended', async (req, res) => {
+  res.sendStatus(200); // Always 200 immediately — Retell retries on non-200
+
+  try {
+    const { event, call } = req.body || {};
+    if (event !== 'call_ended' || !call) return;
+
+    const agentId = call.agent_id;
+    if (!agentId) return;
+
+    const durationMs =
+      call.duration_ms ??
+      (call.end_timestamp && call.start_timestamp
+        ? call.end_timestamp - call.start_timestamp
+        : 0);
+    const durationSec = durationMs / 1000;
+
+    console.log(`[retell-webhook] agent=${agentId}  duration=${durationSec.toFixed(1)}s`);
+
+    if (durationSec <= 15) {
+      console.log('[retell-webhook] Call ≤15 s — no warm transition');
+      return;
+    }
+
+    // ✅ fix 3: use db.getByAgentId (already exists, used in /retell-tools/request-followup)
+    const demo = await db.getByAgentId(agentId);
+    if (!demo || !demo.contact_id) {
+      console.log(`[retell-webhook] No demo found for agent ${agentId}`);
+      return;
+    }
+
+    await transitionToWarm(demo.contact_id);
+
+  } catch (err) {
+    console.error('[retell-webhook] Unhandled error:', err);
+  }
+});
+
 // ─── 404 catch-all ────────────────────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
@@ -2184,6 +2225,141 @@ async function sweepExpired() {
 setInterval(sweepExpired, 60 * 60 * 1000);
 setTimeout(sweepExpired, 30_000);
 
+// ─────────────────────────────────────────────────────────────────────────
+// WARM SEQUENCE — helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+async function transitionToWarm(contactId) {
+  const client = await emailPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `SELECT id, niche, status FROM enrollments WHERE contact_id = $1 LIMIT 1`,
+      [contactId]
+    );
+
+    if (!rows.length) {
+      console.log(`[warm] No enrollment for contact ${contactId}`);
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    const { niche, status } = rows[0];
+
+    if (niche === 'warm') {
+      console.log(`[warm] Contact ${contactId} already in warm sequence — skipping`);
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    if (['completed', 'unsubscribed', 'bounced'].includes(status)) {
+      console.log(`[warm] Contact ${contactId} is "${status}" — skipping warm transition`);
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    await client.query(
+      `UPDATE enrollments
+       SET niche            = 'warm',
+           step             = 0,
+           status           = 'active',
+           next_send_at     = NOW(),
+           last_sent_at     = NULL,
+           thread_id        = NULL,
+           last_message_id  = NULL
+       WHERE contact_id = $1`,
+      [contactId]
+    );
+
+    await client.query('COMMIT');
+    console.log(`[warm] Contact ${contactId} transitioned → warm sequence`);
+
+    // Tag + stage move in GHL (fire-and-forget)
+    markDemoTested(contactId).catch(err =>
+      console.error('[warm] markDemoTested failed:', err)
+    );
+
+    // Restart 7-day cleanup countdown
+    restartCleanupWorkflow(contactId).catch(err =>
+      console.error('[warm] GHL workflow restart failed:', err)
+    );
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function markDemoTested(contactId) {
+  const PIPELINE_ID       = 'NxoKeydZvDnkQEM8u6sy';
+  const DEMO_TESTED_STAGE = 'ad4c1fd7-e0bf-4101-9e1e-3e04a7ec81e2';
+
+  // 1. Add tag
+  await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
+    method  : 'POST',
+    headers : {
+      Authorization  : `Bearer ${CRM_API_KEY}`,
+      Version        : '2021-04-15',
+      'Content-Type' : 'application/json',
+    },
+    body: JSON.stringify({ tags: ['aivoice_agent_tested'] }),
+  }).then(r => console.log(`[warm] Tag aivoice_agent_tested → HTTP ${r.status}`))
+    .catch(e => console.error('[warm] Tag error:', e.message));
+
+  // 2. Find opportunity in the outbound tracking pipeline
+  const searchRes = await fetch(
+    `${CRM_API}/opportunities/search?location_id=${CRM_LOCATION_ID}&contact_id=${contactId}&pipeline_id=${PIPELINE_ID}`,
+    { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
+  );
+  const searchData = await searchRes.json();
+  const opps = searchData.opportunities || [];
+
+  if (!opps.length) {
+    console.log(`[warm] No opportunity found in outbound pipeline for contact ${contactId}`);
+    return;
+  }
+
+  const oppId = opps[0].id;
+
+  // 3. Move from Demo Active → Demo Tested
+  const updateRes = await fetch(`${CRM_API}/opportunities/${oppId}`, {
+    method  : 'PUT',
+    headers : {
+      Authorization  : `Bearer ${CRM_API_KEY}`,
+      Version        : '2021-07-28',
+      'Content-Type' : 'application/json',
+    },
+    body: JSON.stringify({ stageId: DEMO_TESTED_STAGE }),
+  });
+  console.log(`[warm] Opportunity ${oppId} → Demo Tested HTTP ${updateRes.status}`);
+}
+
+async function restartCleanupWorkflow(contactId) {
+  const workflowId = 'b4e7a500-ab7e-4f03-8fe9-3f34308ae7bc';
+  const apiKey     = process.env.CRM_API_KEY;
+  const base       = 'https://services.leadconnectorhq.com';
+  const headers    = {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type':  'application/json',
+    'Version':       '2021-07-28',
+  };
+
+  const del = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
+    method: 'DELETE', headers,
+  });
+  console.log(`[warm] Workflow remove → HTTP ${del.status}`);
+
+  await new Promise(r => setTimeout(r, 1500));
+
+  const add = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
+  });
+  console.log(`[warm] Workflow re-add → HTTP ${add.status}`);
+}
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 db.init()
