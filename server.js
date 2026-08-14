@@ -413,6 +413,11 @@ booking properly and work with the systems you already use. I can set up a quick
 with the Creative Copies team so they can work out exactly what needs adding to make me work for ${businessName}.
 Would you like me to check some times?"
 
+If the caller says "okay", "alright", "I see", "sure", or anything similar while you
+are part-way through the demo-end explanation, do not treat it as a goodbye. They are
+just following along. Keep going through all four points and always ask the question
+about checking times. Only skip the setup call offer if they explicitly say no, not
+interested, or goodbye.
 
 If they say no, thank them warmly and end the call. Do not push.
 If they say yes, go to the booking flow.
@@ -553,9 +558,17 @@ End the call naturally. Do NOT say "Is there anything else I can help you with?"
 ## SPEAKING STYLE
 - Speak naturally, like a warm and capable human receptionist
 - Use natural fillers occasionally: "Sure", "Of course", "Absolutely", "Got it"
-- Keep responses short. This is a phone call, not an email
+- HARD LIMIT: every single response is 1 to 3 sentences. Never longer. This is a phone
+  call — not a chat window, not an email. If you feel yourself going longer, cut it.
 - One question per turn, always
-- Never read out long lists. Summarise and offer to elaborate
+- NEVER use bullet points, dashes, or numbered lists in any response under any
+  circumstances. Only natural spoken sentences. Not a single dash or hyphen for listing.
+- When callers ask what to bring or what they need, fold it into two natural spoken
+  sentences: "You'll want a photo ID and the bond fee — cash, card or debit all work.
+  If you have your friend's full name and the booking number that'll speed things up."
+- When there are more than two things to mention, name the two most important, then
+  say "and a couple of other things" and offer to go through them if the caller asks.
+  Never list everything at once.
 - If asked something specific about ${businessName} that you do not know:
   "That is a great question, and exactly the kind of thing the real version would know
    for your business. That detail gets built in during setup."
@@ -591,6 +604,9 @@ Once the reason for the call is resolved, close warmly and end it.
 - Stay in character as Emma until the demo ends, then be straightforward about being a demo
 - Never merge a doubled letter when spelling. Say "double C", not "C"
 - After the demo ends you are still warm and helpful, just now booking for Creative Copies
+- Never respond with bullet points, numbered lists, or dash-formatted lists — not even
+  once. Always convert lists into natural spoken sentences.
+- Never give more than 3 sentences in a single response. Count them before sending.
 `.trim();
 }
 
@@ -999,7 +1015,7 @@ app.post('/create-agent', async (req, res) => {
         agent_name               : agentDisplayName,
         voice_id                 : VOICE_ID,
         language                 : 'en-US',
-        responsiveness           : 1,
+        responsiveness           : 0.85,
         interruption_sensitivity : 1,
         enable_backchannel       : true,
         backchannel_frequency    : 0.8,
@@ -1192,21 +1208,30 @@ app.post('/recreate-agent', async (req, res) => {
             },
           },
           {
-            type                         : 'custom',
-            name                         : 'request_followup',
-            description                  : "Call this tool ONLY when check_availability has already told the caller there are no openings in the next 2 days and has asked what time of day works best. Pass the caller's answer as preferredTime.",
-            speak_during_execution       : true,
-            speak_after_execution        : true,
-            execution_message_description: 'Tell the caller you are noting their preferred time, e.g. "Perfect, I will make sure the team knows that."',
-            url                          : `${RAILWAY_URL}/retell-tools/request-followup`,
-            parameters: {
-              type: 'object',
-              properties: {
-                preferredTime : { type: 'string', description: 'The time of day the caller prefers for a follow-up call.' },
-                timezone      : { type: 'string', description: 'IANA timezone of the caller.' },
-              },
-              required: ['preferredTime'],
-            },
+    type        : 'end_call',
+    name        : 'end_call',
+    description : 'Hang up the call. Call this immediately after a booking is confirmed, after a follow-up time has been noted, or when the caller says they are not interested. Always say your closing line first, then call this.'
+  },
+          {
+  type                         : 'custom',
+  name                         : 'request_followup',
+  description                  : "Call this tool ONLY when check_availability has said there are no openings in the next 2 days, AND you have collected the caller's first name, last name, email and preferred time of day. The team uses these to reach out and arrange a time.",
+  speak_during_execution       : true,
+  speak_after_execution        : true,
+  execution_message_description: 'Tell the caller you are passing their details to the team, e.g. "Perfect, let me get that over to the team now."',
+  url                          : `${RAILWAY_URL}/retell-tools/request-followup`,
+  parameters: {
+    type      : 'object',
+    properties: {
+      firstName    : { type: 'string', description: "Caller's first name, confirmed and spelled back" },
+      lastName     : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
+      email        : { type: 'string', description: "Caller's email address, confirmed character by character" },
+      preferredTime: { type: 'string', description: 'The time of day the caller prefers for a follow-up call, e.g. "mornings", "after 5pm", "weekday afternoons".' },
+      timezone     : { type: 'string', description: 'IANA timezone of the caller, e.g. America/New_York' },
+    },
+    required: ['firstName', 'lastName', 'email', 'preferredTime'],
+  },
+},
           },
         ],
       }),
@@ -1224,7 +1249,7 @@ app.post('/recreate-agent', async (req, res) => {
         agent_name               : agentDisplayName,
         voice_id                 : VOICE_ID,
         language                 : 'en-US',
-        responsiveness           : 1,
+        responsiveness           : 0.85,
         interruption_sensitivity : 1,
         enable_backchannel       : true,
         backchannel_frequency    : 0.8,
