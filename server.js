@@ -2135,54 +2135,6 @@ app.post('/webhook/call-booked', async (req, res) => {
   }
 });
 
-// ─── ONE-TIME: Patch webhook URL onto all active Retell agents ────────────────
-app.get('/admin/patch-webhooks', async (_req, res) => {
-  const WEBHOOK_URL = `${RAILWAY_PUBLIC_URL}/webhook/retell-call-ended`;
-  const results = { success: [], failed: [] };
-
-  try {
-    const { rows } = await emailPool.query(
-      `SELECT agent_id, slug, business_name 
-       FROM demos 
-       WHERE agent_deleted_at IS NULL 
-         AND agent_id IS NOT NULL`
-    );
-
-    for (const row of rows) {
-      try {
-        const r = await fetch(`${RETELL}/update-agent/${row.agent_id}`, {
-          method  : 'PATCH',
-          headers : {
-            Authorization  : `Bearer ${RETELL_API_KEY}`,
-            'Content-Type' : 'application/json',
-          },
-          body: JSON.stringify({ webhook_url: WEBHOOK_URL }),
-        });
-
-        if (r.ok) {
-          results.success.push(row.business_name);
-        } else {
-          results.failed.push({ name: row.business_name, status: r.status });
-        }
-
-        await new Promise(r => setTimeout(r, 300));
-      } catch (e) {
-        results.failed.push({ name: row.business_name, error: e.message });
-      }
-    }
-
-    return res.json({
-      webhook_url : WEBHOOK_URL,
-      patched     : results.success.length,
-      failed      : results.failed.length,
-      success     : results.success,
-      failures    : results.failed,
-    });
-
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
-});
 // ─── 404 catch-all ────────────────────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
