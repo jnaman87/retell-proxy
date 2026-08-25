@@ -62,6 +62,13 @@ async function init(attempt = 1) {
   console.log('[db] schema ready');
   await pool.query(`ALTER TABLE demos ADD COLUMN IF NOT EXISTS secondary_color TEXT`)
   .catch(e => console.warn('[db] secondary_color migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS phase TEXT DEFAULT 'cold'`).catch(e => console.warn('[db] phase migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS positive_reply_at TIMESTAMPTZ`).catch(e => console.warn('[db] positive_reply_at migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS core_services TEXT`).catch(e => console.warn('[db] core_services migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS tagline TEXT`).catch(e => console.warn('[db] tagline migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS primary_color TEXT`).catch(e => console.warn('[db] primary_color migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS secondary_color TEXT`).catch(e => console.warn('[db] secondary_color migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS caller_faqs TEXT`).catch(e => console.warn('[db] caller_faqs migration skipped:', e.message));
 
 }
 
@@ -77,7 +84,7 @@ async function createDemo(d) {
     `INSERT INTO demos
        (slug, agent_id, llm_id, niche, business_name, city, tagline,
         core_services, primary_color, secondary_color, contact_id, max_calls, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now() + ($13 || ' days')::interval)
+     VALUES (1,2,3,4,5,6,7,8,9,10,11,12, now() + ($13 || ' days')::interval)
      RETURNING *`,
     [
       d.slug, d.agentId, d.llmId, d.niche, d.businessName, d.city, d.tagline,
@@ -178,31 +185,7 @@ async function stats() {
 }
 
 module.exports = {
-  init, slugTaken, createDemo, getBySlug, getByAgentId,  // getByAgentId is new
-  reserveCall, releaseCall,
-  listExpiredUndeleted, markAgentDeleted, stats,
-  pool,
-};
-
-// ─── Rebuild demo (used by /recreate-agent) ─────────────────────────────────
-// Updates agent_id + llm_id for an existing slug in-place.
-// Resets agent_deleted_at, calls_used, and extends expires_at so the
-// demo URL the contact already has becomes live again immediately.
-async function rebuildDemo(slug, agentId, llmId) {
-  await pool.query(`
-    UPDATE demos SET
-      agent_id         = $2,
-      llm_id           = $3,
-      agent_deleted_at = NULL,
-      calls_used       = 0,
-      expires_at       = NOW() + ($4 || ' days')::interval
-    WHERE slug = $1
-  `, [slug, agentId, llmId, String(DEMO_LIFE_DAYS)]);
-}
-
-// ─── exports ────────────────────────────────────────────────────────────────
-module.exports = {
-  init, slugTaken, createDemo, getBySlug, getByAgentId, rebuildDemo,  // rebuildDemo is new
+  init, slugTaken, createDemo, getBySlug, getByAgentId,
   reserveCall, releaseCall,
   listExpiredUndeleted, markAgentDeleted, stats,
   pool,
