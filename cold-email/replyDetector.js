@@ -82,14 +82,19 @@ async function findOpportunity(contactId, pipelineId) {
 
 async function moveOpportunity(oppId, stageId) {
   if (!oppId) return;
-  await fetch(`${CRM_API}/opportunities/${oppId}`, {
+  const r = await fetch(`${CRM_API}/opportunities/${oppId}`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stageId }),
-  }).catch(e => console.error('[detect] stage move failed:', e.message));
+    body: JSON.stringify({ pipelineStageId: stageId }),
+  });
+  if (!r.ok) console.error('[detect] stage move failed:', r.status, await r.text());
+  else console.log(`[detect] ✅ stage moved ${oppId} → ${stageId}`);
 }
 
-// Create a Conversations opportunity (used at Demo Sent).
+// createConversionOpportunity — add status code to error log
+if (!r.ok) console.error('[detect] conversion opp create failed:', r.status, await r.text());
+
+// Create a Conversaions opportunity (used at Demo Sent).
 async function createConversationOpportunity(contactId, companyName) {
   try {
     const r = await fetch(`${CRM_API}/opportunities`, {
