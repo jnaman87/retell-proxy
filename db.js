@@ -80,20 +80,27 @@ async function slugTaken(slug) {
 
 // ─── Create ──────────────────────────────────────────────────────────────────
 async function createDemo(d) {
+  const expiresAt = new Date(Date.now() + DEMO_LIFE_DAYS * 24 * 60 * 60 * 1000);
   const { rows } = await pool.query(
     `INSERT INTO demos
        (slug, agent_id, llm_id, niche, business_name, city, tagline,
         core_services, primary_color, secondary_color, contact_id, max_calls, expires_at)
-     VALUES (1,2,3,4,5,6,7,8,9,10,11,12, now() + ($13::text || ' days')::interval)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING *`,
     [
-      d.slug, d.agentId, d.llmId, d.niche, d.businessName, d.city, d.tagline,
+      d.slug,
+      d.agentId,
+      d.llmId,
+      d.niche,
+      d.businessName,
+      d.city,
+      d.tagline,
       d.coreServices   || '',
       d.primaryColor   || '',
       d.secondaryColor || '',
-      d.contactId      || null,   // NEW
-      d.maxCalls || 5,
-      String(DEMO_LIFE_DAYS),
+      d.contactId      || null,
+      d.maxCalls       || 5,
+      expiresAt,
     ]
   );
   return rows[0];
