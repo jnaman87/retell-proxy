@@ -1060,31 +1060,6 @@ app.post('/create-agent', async (req, res) => {
 
     console.log(`[create-agent] ✅ ${slug} → ${agentData.agent_id}`);
 
-    // ── Enroll in cold email sequence ──────────────────────────────────────────
-const prospectEmail = pick('email', 'Email', 'contact_email');
-if (prospectEmail) {
-  emailPool.query(
-    `INSERT INTO enrollments
-       (contact_id, prospect_email, prospect_name, prospect_city, prospect_tz,
-        niche, company_name, demo_page_url, personalisation_hook, current_pain)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-     ON CONFLICT (prospect_email) DO NOTHING`,
-    [
-      contactId,
-      prospectEmail.toLowerCase().trim(),
-      businessName,
-      city,
-      resolveTimezone(city),
-      nicheLabel,
-      businessName,
-      demoUrl,
-      pick('personalisation_hook', 'Personalisation Hook') || '',
-      pick('current_pain', 'Current Pain')                 || '',
-    ]
-  ).catch(e => console.error('[enroll] insert failed:', e.message));
-  console.log(`[enroll] ✅ queued ${prospectEmail} (${nicheLabel})`);
-}
-
     // Write straight back to the contact. Not awaited on the critical path:
     // a CRM hiccup should not fail an agent that was created successfully.
     updateContactFields(contactId, {
@@ -1106,185 +1081,6 @@ if (prospectEmail) {
   }
 });
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /recreate-agent
-// Rebuilds a Retell LLM + Agent from the existing DB record for a slug.
-// The demo URL the contact already received stays unchanged.
-// Accepts: { slug } OR { demoUrl } in the body.
-// ─────────────────────────────────────────────────────────────────────────────
-app.post('/recreate-agent', async (req, res) => {
-  try {
-    const b   = req.body || {};
-    const raw = { ...b, ...(b.customData || {}) };
-
-    // Accept slug directly or extract from a full demo URL
-    let slug = raw.slug || '';
-    const demoUrl = raw.demoUrl || raw['Demo Page URL'] || '';
-    if (!slug && demoUrl) {
-      const m = demoUrl.match(/\/([a-z0-9][a-z0-9-]{2,59})\/?$/i);
-      if (m) slug = m[1];
-    }
-
-    if (!slug) {
-      return res.status(400).json({ error: 'slug or demoUrl is required' });
-    }
-
-    // Look up the existing demo record
-    const existing = await db.getBySlug(slug);
-    if (!existing) {
-      return res.status(404).json({ error: `No demo record found for slug: ${slug}` });
-    }
-
-    const {
-      niche, business_name, city, tagline,
-      core_services, primary_color, secondary_color, contact_id, max_calls,
-    } = existing;
-
-    const RAILWAY_URL = process.env.RAILWAY_PUBLIC_URL;
-    const RETELL_KEY  = process.env.RETELL_API_KEY;
-    const VOICE_ID    = process.env.RETELL_VOICE_ID || 'retell-Cimo';
-
-    // Rebuild system prompt from stored business data
-    const systemPrompt = buildSystemPrompt({
-      niche,
-      businessName : business_name,
-      city,
-      coreServices : core_services,
-      tagline,
-      callerFaqs   : '',  // not stored in DB; will be empty for recreated agents
-    });
-
-    const nicheLabel       = normalizeNiche(niche);
-    const agentDisplayName = `[${nicheLabel}] ${business_name} - ${city}`;
-    const openingLine      = (NICHE_TEMPLATES[nicheLabel] || NICHE_TEMPLATES.restoration)
-      .openingLine.replace('{businessName}', business_name);
-
-    // ── Create new Retell LLM ─────────────────────────────────────────────────
-    const llmRes = await fetch('https://api.retellai.com/create-retell-llm', {
-      method  : 'POST',
-      headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
-      body    : JSON.stringify({
-        model                 : 'gpt-4.1',
-        model_high_priority   : true,
-        model_temperature     : 0,
-        tool_call_strict_mode : true,
-        begin_message         : openingLine,
-        general_prompt        : systemPrompt,
-        general_tools: [
-          {
-    type                         : 'custom',
-    name                         : 'check_availability',
-    description                  : 'Check available appointment slots. Call this whenever the caller wants to book or asks about available times. After calling this tool, speak the result immediately — do not wait for the caller to say anything.',
-    speak_during_execution       : true,
-    speak_after_execution        : true,
-    execution_message_description: 'Tell the caller you are checking available times for them, e.g. "Let me check what times we have available for you."',
-    url                          : `${RAILWAY_URL}/retell-tools/check-availability`,
-    parameters: {
-      type      : 'object',
-      properties: {
-        date    : { type: 'string', description: 'The calendar date to check, formatted as YYYY-MM-DD.' },
-        timezone: { type: 'string', description: 'IANA timezone derived from the location the caller gave you.' },
-      },
-      required: ['date', 'timezone'],
-    },
-  },
-  {
-    type                         : 'custom',
-    name                         : 'book_appointment',
-    description                  : 'Book a confirmed appointment slot. Only call this after the caller has confirmed their first name, last name, email, and chosen time slot.',
-    speak_during_execution       : true,
-    speak_after_execution        : true,
-    execution_message_description: 'Tell the caller you are booking that slot now, e.g. "Perfect, booking that for you now."',
-    url                          : `${RAILWAY_URL}/retell-tools/book-appointment`,
-    parameters: {
-      type      : 'object',
-      properties: {
-        firstName: { type: 'string', description: "Caller's first name, confirmed and spelled back" },
-        lastName : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
-        email    : { type: 'string', description: "Caller's email address, confirmed character by character" },
-        startTime: { type: 'string', description: 'ISO 8601 datetime string of the selected slot' },
-        timezone : { type: 'string', description: 'IANA timezone of the caller' },
-      },
-      required: ['firstName', 'lastName', 'email', 'startTime'],
-    },
-  },
-  {
-    type                         : 'custom',
-    name                         : 'request_followup',
-    description                  : "Call this tool ONLY when check_availability has said there are no openings in the next 2 days, AND you have collected the caller's first name, last name, email and preferred time of day. The team uses these to reach out and arrange a time.",
-    speak_during_execution       : true,
-    speak_after_execution        : true,
-    execution_message_description: 'Tell the caller you are passing their details to the team, e.g. "Perfect, let me get that over to the team now."',
-    url                          : `${RAILWAY_URL}/retell-tools/request-followup`,
-    parameters: {
-      type      : 'object',
-      properties: {
-        firstName    : { type: 'string', description: "Caller's first name, confirmed and spelled back" },
-        lastName     : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
-        email        : { type: 'string', description: "Caller's email address, confirmed character by character" },
-        preferredTime: { type: 'string', description: 'The time of day the caller prefers for a follow-up call, e.g. "mornings", "after 5pm", "weekday afternoons".' },
-        timezone     : { type: 'string', description: 'IANA timezone of the caller, e.g. America/New_York' },
-      },
-      required: ['firstName', 'lastName', 'email', 'preferredTime'],
-    },
-  },
-  {
-    type       : 'end_call',
-    name       : 'end_call',
-    description: 'Hang up the call. Call this immediately after a booking is confirmed, after a follow-up time has been noted, or when the caller says they are not interested. Always say your closing line first, then call this.',
-  },
-        ],
-      }),
-    });
-
-    if (!llmRes.ok) throw new Error(`LLM creation failed: ${await llmRes.text()}`);
-    const llmData = await llmRes.json();
-
-    // ── Create new Retell Agent ──────────────────────────────────────────────
-    const agentRes = await fetch('https://api.retellai.com/create-agent', {
-      method  : 'POST',
-      headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
-      body    : JSON.stringify({
-        response_engine          : { type: 'retell-llm', llm_id: llmData.llm_id },
-        agent_name               : agentDisplayName,
-        voice_id                 : VOICE_ID,
-        language                 : 'en-US',
-        responsiveness           : 0.85,
-        interruption_sensitivity : 1,
-        enable_backchannel       : true,
-        backchannel_frequency    : 0.8,
-        backchannel_words        : ['got it', 'sure', 'okay', 'absolutely'],
-        ambient_sound            : 'coffee-shop',
-        ambient_sound_volume     : 0.1,
-        reminder_trigger_ms      : 10000,
-        reminder_max_count       : 2,
-        webhook_url : `https://retell-proxy-production.up.railway.app/webhook/retell-call-ended`,
-      }),
-    });
-
-    if (!agentRes.ok) throw new Error(`Agent creation failed: ${await agentRes.text()}`);
-    const agentData = await agentRes.json();
-
-    // ── Update DB record in-place (same slug, same demo URL) ──────────────────
-    await db.rebuildDemo(slug, agentData.agent_id, llmData.llm_id);
-
-    const DEMO_BASE = process.env.DEMO_BASE_URL || 'https://demo.creativecopyz.com';
-    console.log(`[recreate-agent] ✅ ${slug} → ${agentData.agent_id}`);
-
-    return res.json({
-      success  : true,
-      slug,
-      agentId  : agentData.agent_id,
-      llmId    : llmData.llm_id,
-      demoUrl  : `${DEMO_BASE}/${slug}`,
-    });
-
-  } catch (error) {
-    console.error('[recreate-agent] error:', error.message);
-    return res.status(500).json({ success: false, error: error.message });
-  }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-web-call
@@ -2170,10 +1966,130 @@ app.post('/webhook/retell-call-ended', async (req, res) => {
       return;
     }
 
-    await transitionToWarm(demo.contact_id);
+    await transitionToUltraWarm(demo.contact_id);
 
   } catch (err) {
     console.error('[retell-webhook] Unhandled error:', err);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /enroll
+// Enrolls a prospect directly into the cold email sequence. This is what the
+// GHL "Agent Setup" workflow calls now (instead of /create-agent).
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/enroll', async (req, res) => {
+  try {
+    const raw = { ...(req.body || {}), ...((req.body && req.body.customData) || {}) };
+    const pick = (...keys) => {
+      for (const k of keys) {
+        const v = raw[k];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+        if (v != null && typeof v !== 'string') return v;
+      }
+      return '';
+    };
+
+    const niche          = pick('niche', 'Primary Business Type') || 'restoration';
+    const businessName   = cleanBusinessName(pick('businessName', 'company_name') || 'Your Business');
+    const city           = pick('city', 'City') || '';
+    const contactId      = pick('contactId', 'contact_id', 'id', 'Contact Id', 'contactID');
+    const prospectEmail  = pick('email', 'Email', 'contact_email').toLowerCase().trim();
+    const prospectName   = pick('firstName', 'first_name', 'name');
+    const coreServices   = pick('coreServices', 'Core Services');
+    const tagline        = pick('tagline', 'Business Tagline');
+    const callerFaqs     = pick('callerFaqs', 'Caller FAQs');
+    const primaryColor   = pick('primaryColor', 'primary_color', 'Brand Primary Color', 'brand_primary_color', 'Primary Color', 'primary', 'brand_color');
+    const secondaryColor = pick('secondaryColor', 'secondary_color', 'Brand Secondary Color', 'brand_secondary_color', 'Secondary Color', 'secondary', 'brand_secondary');
+    const personalHook   = pick('personalisation_hook', 'Personalisation Hook');
+    const currentPain    = pick('current_pain', 'Current Pain');
+
+    if (!prospectEmail) {
+      return res.status(400).json({ error: 'email is required to enroll' });
+    }
+
+    const nicheLabel = normalizeNiche(niche);
+
+    const insert = await emailPool.query(
+      `INSERT INTO enrollments
+         (contact_id, prospect_email, prospect_name, prospect_city, prospect_tz,
+          phase, niche, company_name, demo_page_url,
+          personalisation_hook, current_pain,
+          core_services, tagline, primary_color, secondary_color, caller_faqs)
+       VALUES ($1,$2,$3,$4,$5,'cold',$6,$7,NULL,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT (prospect_email) DO NOTHING
+       RETURNING id`,
+      [contactId, prospectEmail, prospectName, city, resolveTimezone(city),
+       nicheLabel, businessName, personalHook, currentPain,
+       coreServices, tagline, primaryColor, secondaryColor, callerFaqs]
+    );
+
+    if (insert.rowCount === 0) {
+      console.log(`[enroll] duplicate enrollment skipped: ${prospectEmail}`);
+      return res.json({ success: true, duplicate: true, prospectEmail });
+    }
+
+    console.log(`[enroll] ✅ enrolled ${prospectEmail} (${nicheLabel}) → cold sequence`);
+
+    if (contactId) {
+      const OT_PIPELINE = 'NxoKeydZvDnkQEM8u6sy';
+      const OT_ENROLLED = '3b8e5d41-b647-4f21-a6bf-3ef3d6a34dc6'; // Enrolled in cold-campaign
+      try {
+        await fetch(`${CRM_API}/opportunities`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pipelineId: OT_PIPELINE,
+            locationId: CRM_LOCATION_ID,
+            name: `${businessName} — AI Voice Cold Outreach`,
+            pipelineStageId: OT_ENROLLED,
+            status: 'open',
+            contactId,
+          }),
+        });
+        console.log(`[enroll] ✅ Outbound Tracking opportunity created for ${prospectEmail}`);
+      } catch (e) {
+        console.error('[enroll] opportunity create failed:', e.message);
+      }
+    }
+
+    return res.json({ success: true, prospectEmail, niche: nicheLabel });
+  } catch (error) {
+    console.error('[enroll] error:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /webhook/stop-sequence
+// Manual handling: stop cold/warm/ultra-warm email sequence for a contact.
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/webhook/stop-sequence', async (req, res) => {
+  const raw = { ...(req.body || {}), ...((req.body && req.body.customData) || {}) };
+  const email = (raw.email || raw.Email || raw.prospect_email || '').toLowerCase().trim();
+  const contactId = raw.contactId || raw.contact_id || raw.id || '';
+  if (!email && !contactId) return res.status(400).json({ error: 'email or contactId required' });
+  try {
+    let result;
+    if (email) {
+      result = await emailPool.query(
+        `UPDATE enrollments SET status = 'completed'
+         WHERE prospect_email = $1 AND status IN ('active','awaiting_no_reply')
+         RETURNING prospect_email`, [email]);
+    } else {
+      result = await emailPool.query(
+        `UPDATE enrollments SET status = 'completed'
+         WHERE contact_id = $1 AND status IN ('active','awaiting_no_reply')
+         RETURNING prospect_email`, [contactId]);
+    }
+    if (result.rows.length > 0) {
+      console.log(`[stop-sequence] ✅ stopped for ${result.rows[0].prospect_email}`);
+      return res.json({ success: true, stopped: result.rows[0].prospect_email });
+    }
+    return res.json({ success: true, stopped: null, note: 'No active enrollment found' });
+  } catch (e) {
+    console.error('[stop-sequence] error:', e.message);
+    return res.status(500).json({ error: e.message });
   }
 });
 
@@ -2230,135 +2146,91 @@ setTimeout(sweepExpired, 30_000);
 // WARM SEQUENCE — helpers
 // ─────────────────────────────────────────────────────────────────────────
 
-async function transitionToWarm(contactId) {
+async function transitionToWarm(contactId, demoUrl) {
   const client = await emailPool.connect();
   try {
     await client.query('BEGIN');
-
     const { rows } = await client.query(
-      `SELECT id, niche, status FROM enrollments WHERE contact_id = $1 LIMIT 1`,
+      `SELECT id, phase, status FROM enrollments WHERE contact_id = $1 LIMIT 1`,
       [contactId]
     );
-
-    if (!rows.length) {
-      console.log(`[warm] No enrollment for contact ${contactId}`);
-      await client.query('ROLLBACK');
-      return;
-    }
-
-    const { niche, status } = rows[0];
-
-    if (niche === 'warm') {
-      console.log(`[warm] Contact ${contactId} already in warm sequence — skipping`);
-      await client.query('ROLLBACK');
-      return;
-    }
-
-    if (['completed', 'unsubscribed', 'bounced'].includes(status)) {
-      console.log(`[warm] Contact ${contactId} is "${status}" — skipping warm transition`);
-      await client.query('ROLLBACK');
-      return;
-    }
-
+    if (!rows.length) { console.log(`[warm] No enrollment for contact ${contactId}`); await client.query('ROLLBACK'); return; }
+    const { phase, status } = rows[0];
+    if (phase === 'warm' || phase === 'ultra_warm') { console.log(`[warm] Contact ${contactId} already in ${phase} — skipping`); await client.query('ROLLBACK'); return; }
+    if (['completed', 'unsubscribed', 'bounced'].includes(status)) { console.log(`[warm] Contact ${contactId} is "${status}" — skipping warm transition`); await client.query('ROLLBACK'); return; }
     await client.query(
       `UPDATE enrollments
-       SET niche            = 'warm',
-           step             = 0,
-           status           = 'active',
-           next_send_at     = NOW(),
-           last_sent_at     = NULL,
-           thread_id        = NULL,
-           last_message_id  = NULL
+       SET phase = 'warm', step = 0, status = 'active',
+           next_send_at = NOW(), last_sent_at = NULL,
+           demo_page_url = COALESCE($2, demo_page_url)
+       WHERE contact_id = $1`,
+      [contactId, demoUrl]
+    );
+    await client.query('COMMIT');
+    console.log(`[warm] Contact ${contactId} transitioned → warm sequence`);
+  } catch (err) { await client.query('ROLLBACK'); throw err; }
+  finally { client.release(); }
+}
+
+async function transitionToUltraWarm(contactId) {
+  const client = await emailPool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT id, phase, status FROM enrollments WHERE contact_id = $1 LIMIT 1`,
+      [contactId]
+    );
+    if (!rows.length) { console.log(`[ultra-warm] No enrollment for contact ${contactId}`); await client.query('ROLLBACK'); return; }
+    const { phase, status } = rows[0];
+    if (phase === 'ultra_warm') { console.log(`[ultra-warm] Contact ${contactId} already in ultra_warm — skipping`); await client.query('ROLLBACK'); return; }
+    if (['completed', 'unsubscribed', 'bounced'].includes(status)) { console.log(`[ultra-warm] Contact ${contactId} is "${status}" — skipping`); await client.query('ROLLBACK'); return; }
+    await client.query(
+      `UPDATE enrollments
+       SET phase = 'ultra_warm', step = 0, status = 'active',
+           next_send_at = NOW(), last_sent_at = NULL
        WHERE contact_id = $1`,
       [contactId]
     );
-
     await client.query('COMMIT');
-    console.log(`[warm] Contact ${contactId} transitioned → warm sequence`);
-
-    // Tag + stage move in GHL (fire-and-forget)
-    markDemoTested(contactId).catch(err =>
-      console.error('[warm] markDemoTested failed:', err)
-    );
-
-    // Restart 7-day cleanup countdown
-    restartCleanupWorkflow(contactId).catch(err =>
-      console.error('[warm] GHL workflow restart failed:', err)
-    );
-
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
+    console.log(`[ultra-warm] Contact ${contactId} transitioned → ultra_warm sequence`);
+    markDemoTested(contactId).catch(err => console.error('[ultra-warm] markDemoTested failed:', err));
+    restartCleanupWorkflow(contactId).catch(err => console.error('[ultra-warm] GHL workflow restart failed:', err));
+  } catch (err) { await client.query('ROLLBACK'); throw err; }
+  finally { client.release(); }
 }
 
 async function markDemoTested(contactId) {
-  const PIPELINE_ID       = 'NxoKeydZvDnkQEM8u6sy';
-  const DEMO_TESTED_STAGE = 'ad4c1fd7-e0bf-4101-9e1e-3e04a7ec81e2';
-
-  // 1. Add tag
+  const CV_PIPELINE    = 'Sv3XlTtCmzbGrHrZ3BFL';
+  const CV_DEMO_TESTED = '1a42d192-dc15-4dd0-bd68-f7fef2842dd0';
   await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
-    method  : 'POST',
-    headers : {
-      Authorization  : `Bearer ${CRM_API_KEY}`,
-      Version        : '2021-04-15',
-      'Content-Type' : 'application/json',
-    },
-    body: JSON.stringify({ tags: ['aivoice_agent_tested'] }),
-  }).then(r => console.log(`[warm] Tag aivoice_agent_tested → HTTP ${r.status}`))
+    method: 'POST',
+    headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags: ['aivoice_demo_tested'] }),
+  }).then(r => console.log(`[warm] Tag aivoice_demo_tested → HTTP ${r.status}`))
     .catch(e => console.error('[warm] Tag error:', e.message));
-
-  // 2. Find opportunity in the outbound tracking pipeline
   const searchRes = await fetch(
-    `${CRM_API}/opportunities/search?location_id=${CRM_LOCATION_ID}&contact_id=${contactId}&pipeline_id=${PIPELINE_ID}`,
+    `${CRM_API}/opportunities/search?location_id=${CRM_LOCATION_ID}&contact_id=${contactId}&pipeline_id=${CV_PIPELINE}`,
     { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
   );
   const searchData = await searchRes.json();
   const opps = searchData.opportunities || [];
-
-  if (!opps.length) {
-    console.log(`[warm] No opportunity found in outbound pipeline for contact ${contactId}`);
-    return;
-  }
-
-  const oppId = opps[0].id;
-
-  // 3. Move from Demo Active → Demo Tested
-  const updateRes = await fetch(`${CRM_API}/opportunities/${oppId}`, {
-    method  : 'PUT',
-    headers : {
-      Authorization  : `Bearer ${CRM_API_KEY}`,
-      Version        : '2021-07-28',
-      'Content-Type' : 'application/json',
-    },
-    body: JSON.stringify({ stageId: DEMO_TESTED_STAGE }),
-  });
-  console.log(`[warm] Opportunity ${oppId} → Demo Tested HTTP ${updateRes.status}`);
+  if (!opps.length) { console.log(`[warm] No opportunity found in conversations pipeline for contact ${contactId}`); return; }
+  await fetch(`${CRM_API}/opportunities/${opps[0].id}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stageId: CV_DEMO_TESTED }),
+  }).then(r => console.log(`[warm] Opportunity ${opps[0].id} → Demo Tested HTTP ${r.status}`));
 }
 
 async function restartCleanupWorkflow(contactId) {
   const workflowId = 'b4e7a500-ab7e-4f03-8fe9-3f34308ae7bc';
   const apiKey     = process.env.CRM_API_KEY;
   const base       = 'https://services.leadconnectorhq.com';
-  const headers    = {
-    'Authorization': `Bearer ${apiKey}`,
-    'Content-Type':  'application/json',
-    'Version':       '2021-07-28',
-  };
-
-  const del = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
-    method: 'DELETE', headers,
-  });
+  const headers    = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'Version': '2021-07-28' };
+  const del = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, { method: 'DELETE', headers });
   console.log(`[warm] Workflow remove → HTTP ${del.status}`);
-
   await new Promise(r => setTimeout(r, 1500));
-
-  const add = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
-    method: 'POST', headers,
-    body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
-  });
+  const add = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, { method: 'POST', headers, body: JSON.stringify({ eventStartTime: new Date().toISOString() }) });
   console.log(`[warm] Workflow re-add → HTTP ${add.status}`);
 }
 
