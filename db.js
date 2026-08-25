@@ -84,7 +84,7 @@ async function createDemo(d) {
     `INSERT INTO demos
        (slug, agent_id, llm_id, niche, business_name, city, tagline,
         core_services, primary_color, secondary_color, contact_id, max_calls, expires_at)
-     VALUES (1,2,3,4,5,6,7,8,9,10,11,12, now() + ($13 || ' days')::interval)
+     VALUES (1,2,3,4,5,6,7,8,9,10,11,12, now() + ($13::text || ' days')::interval)
      RETURNING *`,
     [
       d.slug, d.agentId, d.llmId, d.niche, d.businessName, d.city, d.tagline,
