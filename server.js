@@ -86,6 +86,38 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 
+// ── Retell SDK — bundle at startup ───────────────────────────
+const esbuild = require('esbuild');
+let RETELL_SDK_BUNDLE = null;
+
+(async () => {
+  try {
+    const result = await esbuild.build({
+      stdin: {
+        contents: `import { RetellWebClient } from 'retell-client-js-sdk'; export { RetellWebClient };`,
+        resolveDir: __dirname,
+      },
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      write: false,
+      minify: true,
+    });
+    RETELL_SDK_BUNDLE = result.outputFiles[0].text;
+    console.log(`[sdk] ✅ bundled (${RETELL_SDK_BUNDLE.length} bytes)`);
+  } catch (e) {
+    console.error('[sdk] ❌ bundle failed:', e.message);
+  }
+})();
+
+app.get('/retell-sdk.js', (req, res) => {
+  if (!RETELL_SDK_BUNDLE) return res.status(503).type('js').send('// SDK not ready');
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(RETELL_SDK_BUNDLE);
+});
+
+
 // ============================================================
 // NICHE TEMPLATES
 // ============================================================
@@ -1721,28 +1753,6 @@ app.get('/demo-config/:slug', async (req, res) => {
 //      The template's own applyPalette() reads from DEMO_CONFIG and will apply
 //      the same values again — no conflict.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/retell-sdk.js', (req, res) => {
-  if (!RETELL_SDK_CACHE) return res.status(503).type('js').send('// SDK not ready');
-  res.setHeader('Content-Type', 'application/javascript');
-  res.setHeader('Cache-Control', 'no-store');
-  res.send(RETELL_SDK_CACHE);
-});
-
-app.get('/npm/*', async (req, res) => {
-  const url = 'https://cdn.jsdelivr.net' + req.path;
-  try {
-    const r = await fetch(url);
-    if (!r.ok) return res.status(r.status).send('');
-    const text = await r.text();
-    res.setHeader('Content-Type', 'application/javascript');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.send(text);
-  } catch (e) {
-    console.error('[npm-proxy]', req.path, e.message);
-    res.status(503).send('');
-  }
-});
-
 app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   const { slug } = req.params;
   const API_PREFIXES = [
@@ -2302,29 +2312,3 @@ if (saKeys.length > 0) {
     console.error('[boot] database init failed:', e.message);
     process.exit(1);
   });
-
-let RETELL_SDK_CACHE = null;
-(async () => {
-  const urls = [
-    'https://cdn.jsdelivr.net/npm/retell-client-js-sdk/+esm',
-    'https://esm.sh/retell-client-js-sdk',
-  ];
-  for (const url of urls) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) {
-        let text = await r.text();
-        if (text.length > 500) {
-          // Rewrite relative /npm/ imports → absolute jsdelivr URLs
-          text = text
-            .replace(/"\/npm\//g, '"https://cdn.jsdelivr.net/npm/')
-            .replace(/'\/npm\//g, "'https://cdn.jsdelivr.net/npm/");
-          RETELL_SDK_CACHE = text;
-          console.log(`[sdk] ✅ cached ${text.length} bytes from ${url}`);
-          return;
-        }
-      }
-    } catch (e) { console.error('[sdk] failed from', url, e.message); }
-  }
-  console.error('[sdk] ❌ could not cache SDK');
-})();
