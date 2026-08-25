@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "Railway proxy — Creative Copyz AI Voice Receptionist pipeline",
   "main": "server.js",
+  "retell-client-js-sdk": "latest",
+"esbuild": "latest",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"
