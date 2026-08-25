@@ -1802,6 +1802,16 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
 
 
   html = html.replace('<head>', '<head>' + injected);
+
+  html = html.replace(
+    'https://esm.sh/retell-client-js-sdk',
+    'https://cdn.jsdelivr.net/npm/retell-client-js-sdk/+esm'
+  );
+  html = html.replace(
+    'window.RetellWebClient = m.RetellWebClient;',
+    'window.RetellWebClient = m.RetellWebClient || m.default;'
+  );
+
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.send(html);
 });
