@@ -21,7 +21,7 @@ const CV_REPLY_RECEIVED = 'fa5d74ec-aa3f-44d7-89f4-0e59c41788b9';
 
 // ─── CRM helpers ───────────────────────────────────────────────
 async function tagContact(contactId, tag) {
-  await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
+  await fetch(`CRMAPI/contacts/{contactId}/tags`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({ tags: [tag] }),
@@ -29,7 +29,7 @@ async function tagContact(contactId, tag) {
 }
 
 async function addNote(contactId, body) {
-  await fetch(`${CRM_API}/contacts/${contactId}/notes`, {
+  await fetch(`CRMAPI/contacts/{contactId}/notes`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({ body }),
@@ -57,7 +57,7 @@ async function enableDND(contactId, channels) {
       ),
     };
   }
-  const r = await fetch(`${CRM_API}/contacts/${contactId}`, {
+  const r = await fetch(`CRMAPI/contacts/{contactId}`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -69,7 +69,7 @@ async function enableDND(contactId, channels) {
 async function findOpportunity(contactId, pipelineId) {
   try {
     const r = await fetch(
-      `${CRM_API}/opportunities/search?location_id=${LOCATION_ID}&contact_id=${contactId}&pipeline_id=${pipelineId}`,
+      `CRMAPI/opportunities/search?locationid={LOCATION_ID}&contact_id=contactId&pipelineid={pipelineId}`,
       { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
     );
     const d = await r.json();
@@ -82,7 +82,7 @@ async function findOpportunity(contactId, pipelineId) {
 
 async function moveOpportunity(oppId, stageId) {
   if (!oppId) return;
-  await fetch(`${CRM_API}/opportunities/${oppId}`, {
+  await fetch(`CRMAPI/opportunities/{oppId}`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
     body: JSON.stringify({ stageId }),
@@ -205,24 +205,23 @@ async function handlePositive(enrollment, msg) {
     return;
   }
 
-  // Mark positive_reply_at + set phase to warm (thread preserved)
-  await pool.query(
-    `UPDATE enrollments
-     SET positive_reply_at = NOW(), phase = 'warm', step = 0,
-         status = 'active', next_send_at = NOW()
-     WHERE id = $1`,
-    [enrollment.id]
-  );
+// Build the demo FIRST — before touching phase, so the send loop
+// never sees a warm enrollment without a demo URL.
+const demoUrl = await buildDemoForEnrollment(enrollment);
+if (!demoUrl) {
+  console.error(`[detect] demo build failed for ${prospect_email} — skipping warm transition`);
+  return;
+}
 
-  // Build the demo agent + page
-  const demoUrl = await buildDemoForEnrollment(enrollment);
-  if (!demoUrl) {
-    console.error(`[detect] demo build failed for ${prospect_email} — won't transition to warm`);
-    return;
-  }
-
-  // Store the demo URL back on the enrollment
-  await pool.query(`UPDATE enrollments SET demo_page_url = $1 WHERE id = $2`, [demoUrl, enrollment.id]);
+// Single atomic update: phase + demo URL together
+await pool.query(
+  `UPDATE enrollments
+   SET positive_reply_at = NOW(), phase = 'warm', step = 0,
+       status = 'active', next_send_at = NOW() + INTERVAL '2 minutes',
+       demo_page_url = $2
+   WHERE id = $1`,
+  [enrollment.id, demoUrl]
+);
 
   // Tag + note + pipeline moves
   await tagContact(contact_id, 'aivoice_demo_sent');
