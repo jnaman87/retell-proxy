@@ -21,7 +21,7 @@ const CV_REPLY_RECEIVED = 'fa5d74ec-aa3f-44d7-89f4-0e59c41788b9';
 
 // ─── CRM helpers ───────────────────────────────────────────────
 async function tagContact(contactId, tag) {
-  await fetch(`CRMAPI/contacts/{contactId}/tags`, {
+  await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({ tags: [tag] }),
@@ -29,7 +29,7 @@ async function tagContact(contactId, tag) {
 }
 
 async function addNote(contactId, body) {
-  await fetch(`CRMAPI/contacts/{contactId}/notes`, {
+  await fetch(`${CRM_API}/contacts/${contactId}/notes`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({ body }),
@@ -57,7 +57,7 @@ async function enableDND(contactId, channels) {
       ),
     };
   }
-  const r = await fetch(`CRMAPI/contacts/{contactId}`, {
+  const r = await fetch(`${CRM_API}/contacts/${contactId}`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -69,7 +69,7 @@ async function enableDND(contactId, channels) {
 async function findOpportunity(contactId, pipelineId) {
   try {
     const r = await fetch(
-      `CRMAPI/opportunities/search?locationid={LOCATION_ID}&contact_id=contactId&pipelineid={pipelineId}`,
+      `${CRM_API}/opportunities/search?location_id=${LOCATION_ID}&contact_id=${contactId}&pipeline_id=${pipelineId}`,
       { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
     );
     const d = await r.json();
@@ -82,7 +82,7 @@ async function findOpportunity(contactId, pipelineId) {
 
 async function moveOpportunity(oppId, stageId) {
   if (!oppId) return;
-  await fetch(`CRMAPI/opportunities/{oppId}`, {
+  await fetch(`${CRM_API}/opportunities/${oppId}`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
     body: JSON.stringify({ stageId }),
@@ -115,7 +115,6 @@ async function createConversationOpportunity(contactId, companyName) {
 // Returns one of: 'positive' | 'negative' | 'neutral' | 'unsubscribe'
 async function classifyReply(subject, snippet) {
   if (!OPENAI_KEY) {
-    // Fallback: keyword-based when no key is configured
     const text = `${subject} ${snippet}`.toLowerCase();
     if (/\b(unsubscribe|remove me|opt out|stop emails|take me off)\b/.test(text)) return 'unsubscribe';
     if (/\b(no thanks|not interested|no thank you|stop|don't contact|leave me alone|not for us|no, thanks)\b/.test(text)) return 'negative';
@@ -134,13 +133,7 @@ async function classifyReply(subject, snippet) {
         messages: [
           {
             role: 'system',
-            content: `You classify email replies from a business owner who received a cold outreach email about an AI voice receptionist demo.
-Classify the intent into exactly one of:
-- "positive": interested, wants to see the demo, wants more info, wants a call, asks for the page/link, engaged positively
-- "negative": not interested, no thanks, not for us, stop contacting, don't want it
-- "unsubscribe": explicitly asks to unsubscribe / stop emails / remove from list
-- "neutral": anything else — a question, a vague reply, an out-of-office, a comment, or unclear
-Respond ONLY with JSON: {"intent": "positive"|"negative"|"neutral"|"unsubscribe"}`,
+            content: `You classify email replies from a business owner who received a cold outreach email about an AI voice receptionist demo.\nClassify the intent into exactly one of:\n- "positive": interested, wants to see the demo, wants more info, wants a call, asks for the page/link, engaged positively\n- "negative": not interested, no thanks, not for us, stop contacting, don't want it\n- "unsubscribe": explicitly asks to unsubscribe / stop emails / remove from list\n- "neutral": anything else — a question, a vague reply, an out-of-office, a comment, or unclear\nRespond ONLY with JSON: {"intent": "positive"|"negative"|"neutral"|"unsubscribe"}`,
           },
           { role: 'user', content: `Subject: ${subject}\n\nReply: ${snippet}` },
         ],
@@ -161,8 +154,6 @@ Respond ONLY with JSON: {"intent": "positive"|"negative"|"neutral"|"unsubscribe"
 }
 
 // ─── Demo build trigger (positive cold reply) ──────────────────
-// Self-calls the local /create-agent endpoint with the enrollment's
-// stored business data. Returns the demo URL or null on failure.
 async function buildDemoForEnrollment(enrollment) {
   const PORT = process.env.PORT || 3000;
   const base = `http://localhost:${PORT}`;
@@ -205,23 +196,23 @@ async function handlePositive(enrollment, msg) {
     return;
   }
 
-// Build the demo FIRST — before touching phase, so the send loop
-// never sees a warm enrollment without a demo URL.
-const demoUrl = await buildDemoForEnrollment(enrollment);
-if (!demoUrl) {
-  console.error(`[detect] demo build failed for ${prospect_email} — skipping warm transition`);
-  return;
-}
+  // Build the demo FIRST — before touching phase, so the send loop
+  // never sees a warm enrollment without a demo URL.
+  const demoUrl = await buildDemoForEnrollment(enrollment);
+  if (!demoUrl) {
+    console.error(`[detect] demo build failed for ${prospect_email} — skipping warm transition`);
+    return;
+  }
 
-// Single atomic update: phase + demo URL together
-await pool.query(
-  `UPDATE enrollments
-   SET positive_reply_at = NOW(), phase = 'warm', step = 0,
-       status = 'active', next_send_at = NOW() + INTERVAL '2 minutes',
-       demo_page_url = $2
-   WHERE id = $1`,
-  [enrollment.id, demoUrl]
-);
+  // Single atomic update: phase + demo URL together
+  await pool.query(
+    `UPDATE enrollments
+     SET positive_reply_at = NOW(), phase = 'warm', step = 0,
+         status = 'active', next_send_at = NOW() + INTERVAL '2 minutes',
+         demo_page_url = $2
+     WHERE id = $1`,
+    [enrollment.id, demoUrl]
+  );
 
   // Tag + note + pipeline moves
   await tagContact(contact_id, 'aivoice_demo_sent');
@@ -273,12 +264,10 @@ async function handleNeutral(enrollment, msg) {
 // ─── Handle warm / ultra_warm reply ────────────────────────────
 async function handleWarmReply(enrollment, msg) {
   const { contact_id, prospect_email } = enrollment;
-  // Stop the sequence
   await pool.query(`UPDATE enrollments SET status = 'replied' WHERE id = $1`, [enrollment.id]);
   await addNote(contact_id,
     `Reply to ${enrollment.phase} sequence.\n` +
     `From: ${msg.from}\nSubject: ${msg.subject}\n\nReply preview:\n${msg.snippet}`);
-  // Conversations → Reply Received
   const opp = await findOpportunity(contact_id, CV_PIPELINE);
   if (opp) await moveOpportunity(opp.id, CV_REPLY_RECEIVED);
   console.log(`[detect] ${prospect_email} → reply in ${enrollment.phase} (Conversations: Reply Received)`);
