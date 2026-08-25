@@ -14,7 +14,7 @@ const OT_REPLY_RECEIVED       = 'ad4c1fd7-e0bf-4101-9e1e-3e04a7ec81e2';
 const OT_UNSUB_NOT_INTERESTED = '8c9f1603-53f3-4917-97b0-4a89e6507ce6';
 const OT_DEMO_SENT            = 'aed1858d-3090-43da-bf3c-3e398795d4da';
 
-// Conversations
+// Conversions
 const CV_PIPELINE       = 'Sv3XlTtCmzbGrHrZ3BFL';
 const CV_DEMO_SENT      = 'aaedbe52-060f-4d30-a6b3-21b3f8222812';
 const CV_REPLY_RECEIVED = 'fa5d74ec-aa3f-44d7-89f4-0e59c41788b9';
@@ -91,11 +91,8 @@ async function moveOpportunity(oppId, stageId) {
   else console.log(`[detect] ✅ stage moved ${oppId} → ${stageId}`);
 }
 
-// createConversionOpportunity — add status code to error log
-if (!r.ok) console.error('[detect] conversion opp create failed:', r.status, await r.text());
-
-// Create a Conversaions opportunity (used at Demo Sent).
-async function createConversationOpportunity(contactId, companyName) {
+// Create a Conversions opportunity (used at Demo Sent).
+async function createConversionOpportunity(contactId, companyName) {
   try {
     const r = await fetch(`${CRM_API}/opportunities`, {
       method: 'POST',
@@ -109,10 +106,10 @@ async function createConversationOpportunity(contactId, companyName) {
         contactId,
       }),
     });
-    if (!r.ok) console.error('[detect] conversation opp create failed:', await r.text());
-    else console.log(`[detect] ✅ Conversations opportunity created → Demo Sent for ${companyName}`);
+    if (!r.ok) console.error('[detect] conversion opp create failed:', r.status, await r.text());
+    else console.log(`[detect] ✅ Conversions opportunity created → Demo Sent for ${companyName}`);
   } catch (e) {
-    console.error('[detect] conversation opp error:', e.message);
+    console.error('[detect] conversion opp error:', e.message);
   }
 }
 
@@ -231,10 +228,10 @@ async function handlePositive(enrollment, msg) {
   const otOpp = await findOpportunity(contact_id, OT_PIPELINE);
   if (otOpp) await moveOpportunity(otOpp.id, OT_DEMO_SENT);
 
-  // Conversations → Demo Sent (create if missing)
+  // Conversions → Demo Sent (create if missing)
   const cvOpp = await findOpportunity(contact_id, CV_PIPELINE);
   if (cvOpp) await moveOpportunity(cvOpp.id, CV_DEMO_SENT);
-  else await createConversationOpportunity(contact_id, company_name);
+  else await createConversionOpportunity(contact_id, company_name);
 
   console.log(`[detect] ✅ ${prospect_email} → positive reply, demo built, warm sequence started`);
 }
@@ -275,7 +272,7 @@ async function handleWarmReply(enrollment, msg) {
     `From: ${msg.from}\nSubject: ${msg.subject}\n\nReply preview:\n${msg.snippet}`);
   const opp = await findOpportunity(contact_id, CV_PIPELINE);
   if (opp) await moveOpportunity(opp.id, CV_REPLY_RECEIVED);
-  console.log(`[detect] ${prospect_email} → reply in ${enrollment.phase} (Conversations: Reply Received)`);
+  console.log(`[detect] ${prospect_email} → reply in ${enrollment.phase} (Conversions: Reply Received)`);
 }
 
 // ─── Main loop ─────────────────────────────────────────────────
@@ -319,7 +316,7 @@ async function detectRepliesAndBounces() {
           if (!enr.length) continue;
           const enrollment = enr[0];
 
-          // ── Warm / ultra_warm thread → Conversations Reply Received ──
+          // ── Warm / ultra_warm thread → Conversions Reply Received ──
           if (enrollment.phase === 'warm' || enrollment.phase === 'ultra_warm') {
             await handleWarmReply(enrollment, msg);
             continue;
