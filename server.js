@@ -1833,6 +1833,10 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
     'window.RetellWebClient = m.RetellWebClient;',
     'window.RetellWebClient = m.RetellWebClient || m.default;'
   );
+  html = html.replace(
+    "'https://retell-proxy-production.up.railway.app/create-web-call'",
+    "'/create-web-call'"
+  );
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.send(html);
