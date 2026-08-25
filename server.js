@@ -2294,8 +2294,12 @@ let RETELL_SDK_CACHE = null;
     try {
       const r = await fetch(url);
       if (r.ok) {
-        const text = await r.text();
+        let text = await r.text();
         if (text.length > 500) {
+          // Rewrite relative /npm/ imports → absolute jsdelivr URLs
+          text = text
+            .replace(/"\/npm\//g, '"https://cdn.jsdelivr.net/npm/')
+            .replace(/'\/npm\//g, "'https://cdn.jsdelivr.net/npm/");
           RETELL_SDK_CACHE = text;
           console.log(`[sdk] ✅ cached ${text.length} bytes from ${url}`);
           return;
