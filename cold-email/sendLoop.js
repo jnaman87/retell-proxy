@@ -3,7 +3,7 @@ const pool          = require('./pool');
 const { sendEmail } = require('./gmail-sender');
 const SEQUENCES     = require('./sequence');
 
-// ─── Mailbox personas ─────────────────────────────────────────────────────────
+// ─── Mailbox personas ──────────────────────────────────────────
 const MAILBOX_PERSONAS = {
   'anne@ccopyz.net'           : { fullName: 'Anne Schull',    title: 'Director of Client Solutions' },
   'billy@creativecopyz.org'   : { fullName: 'Billy Cooper',   title: 'Business Development Manager' },
@@ -29,18 +29,18 @@ function getPersona(mailbox) {
   return MAILBOX_PERSONAS[mailbox] || { fullName: 'Creative Copyz Team', title: 'Account Manager' };
 }
 
-// ─── Drip gap ─────────────────────────────────────────────────────────────────
+// ─── Drip gap ──────────────────────────────────────────────────
 const DRIP_DELAY_MS = 3 * 60 * 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// ─── IST date helper ──────────────────────────────────────────────────────────
+// ─── IST date helper ───────────────────────────────────────────
 const IST_DATE_SQL = `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE`;
 
 function todayIST() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
-// ─── Field sanitizer ──────────────────────────────────────────────────────────
+// ─── Field sanitizer ───────────────────────────────────────────
 function sanitizeField(value) {
   if (value === null || value === undefined) return '';
   const v = String(value).trim();
@@ -49,25 +49,25 @@ function sanitizeField(value) {
   return v;
 }
 
-// ─── Concurrency guard ────────────────────────────────────────────────────────
+// ─── Concurrency guard ─────────────────────────────────────────
 let loopRunning = false;
 
-// ─── Daily cap tracker ────────────────────────────────────────────────────────
+// ─── Daily cap tracker ─────────────────────────────────────────
 let capHitIST = null;
 
-// ─── Mailbox picker ───────────────────────────────────────────────────────────
+// ─── Mailbox picker (cold only; cap 10 new leads/mailbox/day) ──
 async function pickMailbox() {
   const row = await pool.query(
     `SELECT email FROM mailboxes
      WHERE daily_reset_at < ${IST_DATE_SQL}
-        OR daily_count < 2
+        OR daily_count < 10
      ORDER BY last_sent_at NULLS FIRST
      LIMIT 1`
   );
   return row.rows[0]?.email || null;
 }
 
-// ─── Timezone gate ────────────────────────────────────────────────────────────
+// ─── Timezone gate ─────────────────────────────────────────────
 function isInSendWindow(ianaTimezone) {
   try {
     const local = new Date(new Date().toLocaleString('en-US', { timeZone: ianaTimezone }));
@@ -78,7 +78,64 @@ function isInSendWindow(ianaTimezone) {
   }
 }
 
-// ─── Send loop ────────────────────────────────────────────────────────────────
+// ─── Sequence + variation resolution ───────────────────────────
+// cold[niche][step]  → { delayDays, variants: [...] } → pick a random variant
+// warm[niche][step]  → { delayDays, subject, body }
+// ultra_warm[step]   → { delayDays, subject, body }
+function resolveTemplate(phase, niche, stepIndex) {
+  let seq;
+  if (phase === 'ultra_warm') {
+    seq = SEQUENCES.ultra_warm;
+  } else {
+    seq = (SEQUENCES[phase] && SEQUENCES[phase][niche]) || SEQUENCES.cold.restoration;
+  }
+  const step = seq[stepIndex];
+  if (!step) return null;
+
+  if (Array.isArray(step.variants) && step.variants.length) {
+    const variant = step.variants[Math.floor(Math.random() * step.variants.length)];
+    return { delayDays: step.delayDays, subject: variant.subject, body: variant.body };
+  }
+  return { delayDays: step.delayDays, subject: step.subject, body: step.body };
+}
+
+// ─── No-reply timer: cold finished, no reply by day 11 ─────────
+async function finaliseNoReply(enrollment) {
+  const CRM_API     = 'https://services.leadconnectorhq.com';
+  const CRM_API_KEY = process.env.CRM_API_KEY;
+  const LOCATION_ID = process.env.CRM_LOCATION_ID || 'dImqkGzlWhmVksSXL1WY';
+  const PIPELINE_ID = 'NxoKeydZvDnkQEM8u6sy';
+  const STAGE_NO_REPLY = 'cc480a05-61e8-482b-b0c2-430986b64826';
+
+  try {
+    await fetch(`${CRM_API}/contacts/${enrollment.contact_id}/tags`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags: ['aivoice_no_response'] }),
+    }).catch(e => console.error('[no-reply] tag failed:', e.message));
+
+    const searchRes = await fetch(
+      `${CRM_API}/opportunities/search?location_id=${LOCATION_ID}&contact_id=${enrollment.contact_id}&pipeline_id=${PIPELINE_ID}`,
+      { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
+    );
+    const searchData = await searchRes.json();
+    const opps = searchData.opportunities || [];
+    if (opps.length) {
+      await fetch(`${CRM_API}/opportunities/${opps[0].id}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stageId: STAGE_NO_REPLY }),
+      }).catch(e => console.error('[no-reply] stage move failed:', e.message));
+    }
+
+    await pool.query(`UPDATE enrollments SET status = 'completed' WHERE id = $1`, [enrollment.id]);
+    console.log(`[no-reply] ${enrollment.prospect_email} → No Replies (no response after 5 cold emails)`);
+  } catch (e) {
+    console.error('[no-reply] error:', e.message);
+  }
+}
+
+// ─── Send loop ─────────────────────────────────────────────────
 async function runSendLoop() {
   if (loopRunning) {
     console.log('[loop] previous run still in progress, skipping');
@@ -89,17 +146,21 @@ async function runSendLoop() {
   try {
     const due = await pool.query(
       `SELECT * FROM enrollments
-       WHERE status = 'active'
+       WHERE status IN ('active', 'awaiting_no_reply')
          AND next_send_at <= NOW()
        ORDER BY next_send_at ASC
        LIMIT 6`
     );
 
     for (const enrollment of due.rows) {
+      if (enrollment.status === 'awaiting_no_reply') {
+        await finaliseNoReply(enrollment);
+        continue;
+      }
+
       if (!isInSendWindow(enrollment.prospect_tz)) continue;
 
-      const nicheSeq = SEQUENCES[enrollment.niche] || SEQUENCES.restoration;
-      const template = nicheSeq[enrollment.step];
+      const template = resolveTemplate(enrollment.phase, enrollment.niche, enrollment.step);
 
       if (!template) {
         await pool.query(
@@ -109,17 +170,15 @@ async function runSendLoop() {
         continue;
       }
 
-      // ── Mailbox selection ──────────────────────────────────────────────────
+      // ── Mailbox selection ──────────────────────────────────
       let mailbox;
-      if (enrollment.niche === 'warm') {
-        // Warm: always use pre-assigned mailbox, bypass daily cap entirely
+      if (enrollment.phase === 'warm' || enrollment.phase === 'ultra_warm') {
         mailbox = enrollment.mailbox;
         if (!mailbox) {
-          console.log(`[loop] warm enrollment ${enrollment.id} has no mailbox assigned — skipping`);
+          console.log(`[loop] ${enrollment.phase} enrollment ${enrollment.id} has no mailbox assigned — skipping`);
           continue;
         }
       } else if (enrollment.step === 0) {
-        // Cold step 0: pick a fresh mailbox, respect daily cap
         if (capHitIST === todayIST()) {
           console.log('[loop] daily cap exhausted for today, skipping new lead');
           continue;
@@ -131,7 +190,6 @@ async function runSendLoop() {
           continue;
         }
       } else {
-        // Cold follow-ups: stay on the same mailbox
         mailbox = enrollment.mailbox;
       }
 
@@ -141,6 +199,7 @@ async function runSendLoop() {
         personalisation_hook: sanitizeField(enrollment.personalisation_hook),
         current_pain:         sanitizeField(enrollment.current_pain),
       };
+
       const subject = template.subject(e);
       const body    = template.body(e, persona)
         + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".';
@@ -157,10 +216,19 @@ async function runSendLoop() {
           references: enrollment.last_message_id,
         });
 
-        const nextStep      = enrollment.step + 1;
-        const isDone        = nextStep >= nicheSeq.length;
-        const rawDelay      = String(template.delayDays || 3);
+        const nextStep = enrollment.step + 1;
+        const seqLen = enrollment.phase === 'ultra_warm'
+          ? SEQUENCES.ultra_warm.length
+          : (SEQUENCES[enrollment.phase] && SEQUENCES[enrollment.phase][enrollment.niche] || SEQUENCES.cold.restoration).length;
+        const isDone = nextStep >= seqLen;
+        const rawDelay = String(template.delayDays || 3);
         const delayInterval = /[a-zA-Z]/.test(rawDelay) ? rawDelay : `${rawDelay} days`;
+
+        const isColdDone = enrollment.phase === 'cold' && isDone;
+        const newStatus = isColdDone ? 'awaiting_no_reply' : (isDone ? 'completed' : 'active');
+        const newNext = isColdDone
+          ? `NOW() + '3 days'::interval`
+          : (isDone ? 'NULL' : `NOW() + $6::INTERVAL`);
 
         await pool.query(
           `UPDATE enrollments SET
@@ -169,16 +237,14 @@ async function runSendLoop() {
              thread_id       = COALESCE(thread_id, $3),
              last_message_id = $4,
              last_sent_at    = NOW(),
-             next_send_at    = CASE WHEN $5 THEN NULL
-                                    ELSE NOW() + $6::INTERVAL END,
-             status          = CASE WHEN $5 THEN 'completed' ELSE 'active' END
+             next_send_at    = ${newNext},
+             status          = $5
            WHERE id = $7`,
           [nextStep, mailbox, result.threadId, result.messageId,
-           isDone, delayInterval, enrollment.id]
+           newStatus, delayInterval, enrollment.id]
         );
 
-        // ── Mailbox stats: daily_count only for cold step 0 ───────────────────
-        if (enrollment.step === 0 && enrollment.niche !== 'warm') {
+        if (enrollment.step === 0 && enrollment.phase === 'cold') {
           await pool.query(
             `UPDATE mailboxes SET
                last_sent_at   = NOW(),
@@ -195,9 +261,8 @@ async function runSendLoop() {
           );
         }
 
-        console.log(`[loop] ✅ step ${enrollment.step} sent to ${enrollment.prospect_email} via ${mailbox}`);
+        console.log(`[loop] ✅ step ${enrollment.step} sent to ${enrollment.prospect_email} via ${mailbox} (${enrollment.phase})`);
 
-        // ── 3-minute drip gap ──────────────────────────────────────────────────
         console.log('[loop] waiting 3 min before next send...');
         await sleep(DRIP_DELAY_MS);
 
