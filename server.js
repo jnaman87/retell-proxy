@@ -2380,7 +2380,6 @@ async function markDemoTested(contactId) {
   { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
 );
   const searchData = await searchRes.json();
-  const searchData = await searchRes.json();
 console.log(`[ultra_warm] Search status=${searchRes.status} data=${JSON.stringify(searchData).slice(0,300)}`);
   const opps = searchData.opportunities || [];
 
