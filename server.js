@@ -2359,7 +2359,6 @@ async function transitionToUltraWarm(contactId) {
 
 async function markDemoTested(contactId) {
   const CRM_BASE          = 'https://services.leadconnectorhq.com';
-  const PIPELINE_ID       = 'Sv3XlTtCmzbGrHrZ3BFL';
   const DEMO_TESTED_STAGE = '1a42d192-dc15-4dd0-bd68-f7fef2842dd0';
 
   // 1. Tag
@@ -2374,21 +2373,16 @@ async function markDemoTested(contactId) {
   }).then(r => console.log(`[ultra_warm] Tag → HTTP ${r.status}`))
     .catch(e => console.error('[ultra_warm] Tag error:', e.message));
 
-  // 2. Find Conversions pipeline opportunity
-  const searchRes = await fetch(
-  `${CRM_BASE}/opportunities/search?location_id=${process.env.CRM_LOCATION_ID}&contact_id=${contactId}&pipeline_id=${PIPELINE_ID}`,
-  { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
-);
-  const searchData = await searchRes.json();
-console.log(`[ultra_warm] Search status=${searchRes.status} data=${JSON.stringify(searchData).slice(0,300)}`);
-  const opps = searchData.opportunities || [];
-
-  if (!opps.length) {
-    console.log(`[ultra_warm] No opportunity in Conversions pipeline for ${contactId}`);
+  // 2. Get Conversions opp ID from DB
+  const { rows: oppRows } = await emailPool.query(
+    'SELECT conversions_opp_id FROM enrollments WHERE contact_id = $1 LIMIT 1',
+    [contactId]
+  );
+  const oppId = oppRows[0]?.conversions_opp_id;
+  if (!oppId) {
+    console.log(`[ultra_warm] No Conversions opp ID stored for ${contactId}`);
     return;
   }
-
-  const oppId = opps[0].id;
 
   // 3. Move → Demo Tested
   const updateRes = await fetch(`${CRM_BASE}/opportunities/${oppId}`, {
