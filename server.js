@@ -2156,7 +2156,7 @@ app.post('/webhook/retell-call-ended', async (req, res) => {
         : 0);
     const durationSec = durationMs / 1000;
 
-    console.log(`[retell-webhook] agent=agentIdduration={durationSec.toFixed(1)}s`);
+    console.log(`[retell-webhook] agent=${agentId}  duration=${durationSec.toFixed(1)}s`);
 
     if (durationSec <= 15) {
       console.log('[retell-webhook] Call ≤15 s — no transition');
@@ -2169,11 +2169,15 @@ app.post('/webhook/retell-call-ended', async (req, res) => {
       return;
     }
 
-    const enrollment = await db.getEnrollment(demo.email);
-    if (!enrollment) {
-      console.log(`[retell-webhook] No enrollment for ${demo.email}`);
-      return;
-    }
+    const { rows: eRows } = await emailPool.query(
+  'SELECT phase, status FROM enrollments WHERE prospect_email = $1 LIMIT 1',
+  [demo.email]
+);
+const enrollment = eRows[0];
+if (!enrollment) {
+  console.log(`[retell-webhook] No enrollment for ${demo.email}`);
+  return;
+}
 
     if (enrollment.phase === 'warm') {
       console.log(`[retell-webhook] phase=warm → transitionToUltraWarm`);
