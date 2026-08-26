@@ -86,38 +86,6 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 
-// ── Retell SDK — bundle at startup ───────────────────────────
-const esbuild = require('esbuild');
-let RETELL_SDK_BUNDLE = null;
-
-(async () => {
-  try {
-    const result = await esbuild.build({
-      stdin: {
-        contents: `import { RetellWebClient } from 'retell-client-js-sdk'; export { RetellWebClient };`,
-        resolveDir: __dirname,
-      },
-      bundle: true,
-      format: 'esm',
-      platform: 'browser',
-      write: false,
-      minify: true,
-    });
-    RETELL_SDK_BUNDLE = result.outputFiles[0].text;
-    console.log(`[sdk] ✅ bundled (${RETELL_SDK_BUNDLE.length} bytes)`);
-  } catch (e) {
-    console.error('[sdk] ❌ bundle failed:', e.message);
-  }
-})();
-
-app.get('/retell-sdk.js', (req, res) => {
-  if (!RETELL_SDK_BUNDLE) return res.status(503).type('js').send('// SDK not ready');
-  res.setHeader('Content-Type', 'application/javascript');
-  res.setHeader('Cache-Control', 'no-store');
-  res.send(RETELL_SDK_BUNDLE);
-});
-
-
 // ============================================================
 // NICHE TEMPLATES
 // ============================================================
@@ -1837,7 +1805,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
 
   html = html.replace(
     'https://esm.sh/retell-client-js-sdk',
-    '/retell-sdk.js'
+    'https://cdn.jsdelivr.net/npm/retell-client-js-sdk/+esm'
   );
   html = html.replace(
     'window.RetellWebClient = m.RetellWebClient;',
