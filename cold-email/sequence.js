@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * Creative Copyz — Email sequences
+ * Creative Copyz - Email sequences
  *
  * Structure:
  *   SEQUENCES.cold[niche]      → 5-step cold sequence, each step = { delayDays, variants: [...] }
- *                                (variation picked at random per send). No demo URL — demo is
+ *                                (variation picked at random per send). No demo URL, demo is
  *                                built only after a positive reply.
  *   SEQUENCES.warm[niche]      → 3-step warm sequence (per-niche). Sent after a POSITIVE reply,
  *                                demo page already built. Continues in the SAME thread as cold.
@@ -343,7 +343,7 @@ for (const [niche, words] of Object.entries(COLD_NICHE_WORDS)) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// WARM — sent after a POSITIVE reply. Demo page is now built.
+// WARM - sent after a POSITIVE reply. Demo page is now built.
 // Uses the existing per-niche cold emails (which carry the
 // demo_page_url). Same thread as cold. 3 emails over 5 days.
 // ─────────────────────────────────────────────────────────────
@@ -911,7 +911,7 @@ ${p.title} | Creative Copyz`,
 };
 
 // ─────────────────────────────────────────────────────────────
-// ULTRA WARM — after the demo is TESTED (call > 15s).
+// ULTRA WARM - after the demo is TESTED (call > 15s).
 // Same thread. 3 emails over 5 days. Resets the 7-day timer.
 // ─────────────────────────────────────────────────────────────
 const ultra_warm = [
@@ -920,7 +920,7 @@ const ultra_warm = [
     delayDays: 2,
     body: (e, p) => `curious what you thought.
 
-you gave Emma a call — most people are surprised how naturally she handles everything, from fielding questions after-hours to booking jobs on the spot. anything stand out?
+you gave Emma a call. most people are surprised how naturally she handles everything, from fielding questions after-hours to booking jobs on the spot. anything stand out?
 
 if you're open to it, I'd love to get on a quick 15-min call and walk you through what this looks like inside ${e.company_name}'s operation.
 
@@ -933,15 +933,15 @@ Head of Business Development | Creative Copyz`,
   {
     subject: () => `still thinking it over`,
     delayDays: 2,
-    body: (e, p) => `still thinking it over — the demo line is still live if you want to try it again:
+    body: (e, p) => `still thinking it over. the demo line is still live if you want to try it again:
 
 ${e.demo_page_url}
 
 a couple of things that usually come up:
 
-"does it actually sound human?" — Emma was built for this. she handles the back-and-forth naturally, knows when to escalate, and doesn't drop calls.
+"does it actually sound human?" Emma was built for this. she handles the back-and-forth naturally, knows when to escalate, and doesn't drop calls.
 
-"what if it can't answer something?" — she captures the lead and flags it. nothing slips through.
+"what if it can't answer something?" she captures the lead and flags it. nothing slips through.
 
 if you're ready to see how this fits ${e.company_name}, just reply and we'll make it happen.
 
