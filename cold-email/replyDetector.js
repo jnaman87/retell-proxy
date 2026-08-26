@@ -18,6 +18,7 @@ const OT_DEMO_SENT            = 'aed1858d-3090-43da-bf3c-3e398795d4da';
 const CV_PIPELINE       = 'Sv3XlTtCmzbGrHrZ3BFL';
 const CV_DEMO_SENT      = 'aaedbe52-060f-4d30-a6b3-21b3f8222812';
 const CV_REPLY_RECEIVED = 'fa5d74ec-aa3f-44d7-89f4-0e59c41788b9';
+const CV_UNSUB_NOT_INTERESTED = '0c0ed89a-9e9c-4e5a-b9c2-d61c5f2d7416';
 
 // ─── CRM helpers ───────────────────────────────────────────────
 async function tagContact(contactId, tag) {
@@ -250,16 +251,26 @@ async function handlePositive(enrollment, msg) {
 
 // ─── Handle negative / unsubscribe cold reply ──────────────────
 async function handleNegative(enrollment, msg, isUnsub) {
-  const { contact_id, prospect_email } = enrollment;
+  const { contact_id, prospect_email, phase } = enrollment;
   await pool.query(`UPDATE enrollments SET status = 'unsubscribed' WHERE id = $1`, [enrollment.id]);
   await tagContact(contact_id, 'aivoice_reply_negative');
   await enableDND(contact_id, 'all');
   await addNote(contact_id,
-    `${isUnsub ? 'Unsubscribed' : 'Not interested'} reply to cold email.\n` +
+    `${isUnsub ? 'Unsubscribed' : 'Not interested'} reply to ${phase} email.\n` +
     `From: ${msg.from}\nSubject: ${msg.subject}\n\nReply preview:\n${msg.snippet}`);
-  const opp = await findOpportunity(contact_id, OT_PIPELINE);
-  if (opp) await moveOpportunity(opp.id, OT_UNSUB_NOT_INTERESTED);
-  console.log(`[detect] ${prospect_email} → ${isUnsub ? 'unsubscribed' : 'not interested'}`);
+
+  if (phase === 'cold') {
+    // OT pipeline → Unsubscribed / Not Interested
+    const opp = await findOpportunity(contact_id, OT_PIPELINE);
+    if (opp) await moveOpportunity(opp.id, OT_UNSUB_NOT_INTERESTED);
+  } else {
+    // warm / ultra_warm: OT opp stays at Demo Sent
+    // Conversions opp → Unsubscribed / Not Interested
+    const cvOpp = await findOpportunity(contact_id, CV_PIPELINE);
+    if (cvOpp) await moveOpportunity(cvOpp.id, CV_UNSUB_NOT_INTERESTED);
+  }
+
+  console.log(`[detect] ${prospect_email} → ${isUnsub ? 'unsubscribed' : 'not interested'} (phase: ${phase})`);
 }
 
 // ─── Handle neutral cold reply ─────────────────────────────────
