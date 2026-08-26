@@ -278,15 +278,25 @@ async function handleNeutral(enrollment, msg) {
 // ─── Handle warm / ultra_warm reply ────────────────────────────
 async function handleWarmReply(enrollment, msg) {
   const { contact_id, prospect_email } = enrollment;
+
+  const intent = await classifyReply(msg.subject, msg.snippet);
+  console.log(`[detect] ${prospect_email} ${enrollment.phase} reply classified: ${intent}`);
+
+  // Negative or unsubscribe → full stop (DND + tag + OT pipeline)
+  if (intent === 'negative' || intent === 'unsubscribe') {
+    await handleNegative(enrollment, msg, intent === 'unsubscribe');
+    return;
+  }
+
+  // Positive or neutral → mark replied, note, move Conversions opp
   await pool.query(`UPDATE enrollments SET status = 'replied' WHERE id = $1`, [enrollment.id]);
   await addNote(contact_id,
-    `Reply to ${enrollment.phase} sequence.\n` +
+    `Reply to ${enrollment.phase} sequence (${intent}).\n` +
     `From: ${msg.from}\nSubject: ${msg.subject}\n\nReply preview:\n${msg.snippet}`);
   const opp = await findOpportunity(contact_id, CV_PIPELINE);
   if (opp) await moveOpportunity(opp.id, CV_REPLY_RECEIVED);
-  console.log(`[detect] ${prospect_email} → reply in ${enrollment.phase} (Conversions: Reply Received)`);
+  console.log(`[detect] ${prospect_email} → ${enrollment.phase} reply (${intent}) → Conversions: Reply Received`);
 }
-
 // ─── Main loop ─────────────────────────────────────────────────
 async function detectRepliesAndBounces() {
   try {
