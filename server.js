@@ -1338,7 +1338,7 @@ app.post('/create-web-call', async (req, res) => {
       await db.releaseCall(agentId).catch(() => {});
       return res.status(retellRes.status).json({ error: 'Web call creation failed', details: data });
     }
-    console.log(`[create-web-call] Agent ${agentId} — reservation.callsused/{reservation.max_calls} calls used`);
+    console.log(`[create-web-call] Agent ${agentId} — ${reservation.callsused}/${reservation.max_calls} calls used`);
     console.log(`[create-web-call] ✅ Call created — id: ${data.call_id}`);
     return res.json({
       success     : true,
@@ -2170,8 +2170,8 @@ app.post('/webhook/retell-call-ended', async (req, res) => {
     }
 
     const { rows: eRows } = await emailPool.query(
-  'SELECT phase, status FROM enrollments WHERE prospect_email = $1 LIMIT 1',
-  [demo.email]
+  'SELECT phase, status FROM enrollments WHERE contact_id = $1 LIMIT 1',
+  [demo.contact_id]
 );
 const enrollment = eRows[0];
 if (!enrollment) {
