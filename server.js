@@ -62,11 +62,11 @@ async function generateSlug(businessName, city) {
   const abbrev = CITY_ABBREV[(city || '').toLowerCase()]
     || (city || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 3)
     || 'x';
-  const withCity = `${base}-${abbrev}-aivoicedemo`;
+  const withCity = `base-{abbrev}-aivoicedemo`;
   if (!(await db.slugTaken(withCity))) return withCity;
   let n = 2;
-  while (await db.slugTaken(`${base}-${abbrev}-${n}-aivoicedemo`)) n++;
-  return `${base}-${abbrev}-${n}-aivoicedemo`;
+  while (await db.slugTaken(`base-{abbrev}-${n}-aivoicedemo`)) n++;
+  return `base-{abbrev}-${n}-aivoicedemo`;
 }
 
 
@@ -692,7 +692,7 @@ async function getCrmFieldMap() {
   if (crmFieldMap) return crmFieldMap;
   try {
     const r = await fetch(
-      `${CRM_API}/locations/${CRM_LOCATION_ID}/customFields`,
+      `CRMAPI/locations/{CRM_LOCATION_ID}/customFields`,
       { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
     );
     const d = await r.json();
@@ -740,7 +740,7 @@ async function updateContactFields(contactId, values) {
 
 
   try {
-    const r = await fetch(`${CRM_API}/contacts/${contactId}`, {
+    const r = await fetch(`CRMAPI/contacts/{contactId}`, {
       method  : 'PUT',
       headers : {
         Authorization  : `Bearer ${CRM_API_KEY}`,
@@ -893,9 +893,9 @@ app.post('/create-agent', async (req, res) => {
     );
 
 
-    console.log(`[create-agent] niche="${niche}" business="${rawName}" city="${city}"`);
-    console.log(`[create-agent] coreServices="${coreServices}" callerFaqs="${callerFaqs}"`);
-    console.log(`[create-agent] 🎨 primaryColor="${primaryColor}" secondaryColor="${secondaryColor}"`);
+    console.log(`[create-agent] niche="niche"business="{rawName}" city="${city}"`);
+    console.log(`[create-agent] coreServices="coreServices"callerFaqs="{callerFaqs}"`);
+    console.log(`[create-agent] 🎨 primaryColor="primaryColor"secondaryColor="{secondaryColor}"`);
     console.log(`[create-agent] 📦 raw keys: ${Object.keys(raw).join(', ')}`);
 
 
@@ -1039,7 +1039,7 @@ app.post('/create-agent', async (req, res) => {
     const agentData = await agentRes.json();
     const slug      = await generateSlug(businessName, city);
     const DEMO_BASE = process.env.DEMO_BASE_URL || 'https://demo.creativecopyz.com';
-    const demoUrl   = `${DEMO_BASE}/${slug}`;
+    const demoUrl   = `DEMOBASE/{slug}`;
 
 
     await db.createDemo({
@@ -1082,7 +1082,7 @@ if (prospectEmail) {
       pick('current_pain', 'Current Pain')                 || '',
     ]
   ).catch(e => console.error('[enroll] insert failed:', e.message));
-  console.log(`[enroll] ✅ queued ${prospectEmail} (${nicheLabel})`);
+  console.log(`[enroll] ✅ queued prospectEmail({nicheLabel})`);
 }
 
     // Write straight back to the contact. Not awaited on the critical path:
@@ -1277,7 +1277,7 @@ app.post('/recreate-agent', async (req, res) => {
       slug,
       agentId  : agentData.agent_id,
       llmId    : llmData.llm_id,
-      demoUrl  : `${DEMO_BASE}/${slug}`,
+      demoUrl  : `DEMOBASE/{slug}`,
     });
 
   } catch (error) {
@@ -1338,7 +1338,7 @@ app.post('/create-web-call', async (req, res) => {
       await db.releaseCall(agentId).catch(() => {});
       return res.status(retellRes.status).json({ error: 'Web call creation failed', details: data });
     }
-    console.log(`[create-web-call] Agent ${agentId} — ${reservation.calls_used}/${reservation.max_calls} calls used`);
+    console.log(`[create-web-call] Agent ${agentId} — reservation.callsused/{reservation.max_calls} calls used`);
     console.log(`[create-web-call] ✅ Call created — id: ${data.call_id}`);
     return res.json({
       success     : true,
@@ -1366,8 +1366,8 @@ app.get('/check-availability', async (req, res) => {
   try {
     const startTs = new Date(startDate).getTime();
     const endTs   = new Date(endDate).getTime();
-    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
-      `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
+    const url = `CRMAPI/calendars/{CRM_CALENDAR_ID}/free-slots` +
+      `?startDate=startTs&endDate={endTs}&timezone=${encodeURIComponent(timezone)}`;
     const crmRes = await fetch(url, {
       headers : { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15' },
     });
@@ -1407,8 +1407,8 @@ app.get('/check-specific-time', async (req, res) => {
     const endDate = nextDay.toISOString().split('T')[0];
     const startTs = new Date(date).getTime();
     const endTs   = new Date(endDate).getTime();
-    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
-      `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
+    const url = `CRMAPI/calendars/{CRM_CALENDAR_ID}/free-slots` +
+      `?startDate=startTs&endDate={endTs}&timezone=${encodeURIComponent(timezone)}`;
     const crmRes = await fetch(url, {
       headers : { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15' },
     });
@@ -1567,8 +1567,8 @@ app.post('/retell-tools/check-availability', async (req, res) => {
 
     const startTs = new Date(date).getTime();
     const endTs   = new Date(endDate).getTime();
-    const url = `${CRM_API}/calendars/${CRM_CALENDAR_ID}/free-slots` +
-      `?startDate=${startTs}&endDate=${endTs}&timezone=${encodeURIComponent(timezone)}`;
+    const url = `CRMAPI/calendars/{CRM_CALENDAR_ID}/free-slots` +
+      `?startDate=startTs&endDate={endTs}&timezone=${encodeURIComponent(timezone)}`;
 
 
     const crmRes = await fetch(url, {
@@ -1651,7 +1651,7 @@ app.post('/retell-tools/request-followup', async (req, res) => {
     });
   }
  
-  console.log(`[request-followup] ${firstName} ${lastName} <${email}> prefers "${preferredTime}" (${timezone}) | agentId=${agentId || '(none)'}`);
+  console.log(`[request-followup] ${firstName} lastName<{email}> prefers "preferredTime"({timezone}) | agentId=${agentId || '(none)'}`);
  
   // Which demo this came from. Enrichment only — the contact is resolved by
   // email below, so a missing agent id no longer breaks the whole flow.
@@ -1659,7 +1659,7 @@ app.post('/retell-tools/request-followup', async (req, res) => {
   if (agentId) {
     try {
       const d = await db.getByAgentId(agentId);
-      if (d) demoLabel = ` | Demo: ${d.business_name} (${d.slug})`;
+      if (d) demoLabel = ` | Demo: d.businessname({d.slug})`;
     } catch (e) {
       console.error('[request-followup] demo lookup failed:', e.message);
     }
@@ -1692,7 +1692,7 @@ app.post('/retell-tools/request-followup', async (req, res) => {
     console.log(`[request-followup] contact ${isNew ? 'created' : 'matched'} — id: ${contactId}`);
  
     // ── Tag
-    await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
+    await fetch(`CRMAPI/contacts/{contactId}/tags`, {
       method  : 'POST',
       headers : {
         Authorization  : `Bearer ${CRM_API_KEY}`,
@@ -1706,12 +1706,12 @@ app.post('/retell-tools/request-followup', async (req, res) => {
     // ── Note
     const noteBody = {
       body: `AI Voice Demo follow-up. No calendar openings were available during the call. `
-          + `Caller: ${firstName} ${lastName} <${email}>. `
-          + `Preferred contact time: ${preferredTime} (${timezone}).${demoLabel}`
+          + `Caller: ${firstName} lastName<{email}>. `
+          + `Preferred contact time: preferredTime({timezone}).${demoLabel}`
     };
     if (process.env.CRM_USER_ID) noteBody.userId = process.env.CRM_USER_ID;
  
-    await fetch(`${CRM_API}/contacts/${contactId}/notes`, {
+    await fetch(`CRMAPI/contacts/{contactId}/notes`, {
       method  : 'POST',
       headers : {
         Authorization  : `Bearer ${CRM_API_KEY}`,
@@ -1962,7 +1962,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   const pHex    = ordered.primary;
   const sHex    = ordered.secondary;
   const palette = computePalette(pHex, sHex);
-  console.log(`[slug] ${slug} palette: stored p=${r.primary_color} s=${r.secondary_color} -> serving p=#${pHex} s=#${sHex}`);
+  console.log(`[slug] slugpalette:storedp={r.primary_color} s=r.secondarycolor->servingp=#{pHex} s=#${sHex}`);
 
 
   // Build an inline-JS snippet that calls setProperty() on <html> immediately.
@@ -1970,7 +1970,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   // cannot be beaten by any stylesheet rule — including the template's
   // hardcoded :root block which would otherwise win over an injected <style>.
   const paletteJs = Object.entries(palette)
-    .map(([k, v]) => `d.style.setProperty(${JSON.stringify(k)},${JSON.stringify(v)})`)
+    .map(([k, v]) => `d.style.setProperty(JSON.stringify(k),{JSON.stringify(v)})`)
     .join(';');
 
 
@@ -2054,7 +2054,7 @@ app.post('/delete-agent', async (req, res) => {
   let agentDeleted = false;
   let llmDeleted   = false;
   try {
-    const agentRes = await fetch(`${RETELL}/delete-agent/${agentId}`, {
+    const agentRes = await fetch(`RETELL/delete-agent/{agentId}`, {
       method  : 'DELETE',
       headers : { 'Authorization': `Bearer ${RETELL_KEY}` },
     });
@@ -2070,7 +2070,7 @@ app.post('/delete-agent', async (req, res) => {
       console.error(`[delete-agent] Agent delete failed (${agentRes.status}): ${err}`);
     }
     if (llmId) {
-      const llmRes = await fetch(`${RETELL}/delete-retell-llm/${llmId}`, {
+      const llmRes = await fetch(`RETELL/delete-retell-llm/{llmId}`, {
         method  : 'DELETE',
         headers : { 'Authorization': `Bearer ${RETELL_KEY}` },
       });
@@ -2140,7 +2140,7 @@ app.post('/webhook/call-booked', async (req, res) => {
 // POST /webhook/retell-call-ended
 // ─────────────────────────────────────────────────────────────────────────
 app.post('/webhook/retell-call-ended', async (req, res) => {
-  res.sendStatus(200); // Always 200 immediately — Retell retries on non-200
+  res.sendStatus(200);
 
   try {
     const { event, call } = req.body || {};
@@ -2156,21 +2156,32 @@ app.post('/webhook/retell-call-ended', async (req, res) => {
         : 0);
     const durationSec = durationMs / 1000;
 
-    console.log(`[retell-webhook] agent=${agentId}  duration=${durationSec.toFixed(1)}s`);
+    console.log(`[retell-webhook] agent=agentIdduration={durationSec.toFixed(1)}s`);
 
     if (durationSec <= 15) {
-      console.log('[retell-webhook] Call ≤15 s — no warm transition');
+      console.log('[retell-webhook] Call ≤15 s — no transition');
       return;
     }
 
-    // ✅ fix 3: use db.getByAgentId (already exists, used in /retell-tools/request-followup)
     const demo = await db.getByAgentId(agentId);
     if (!demo || !demo.contact_id) {
       console.log(`[retell-webhook] No demo found for agent ${agentId}`);
       return;
     }
 
-    await transitionToWarm(demo.contact_id);
+    const enrollment = await db.getEnrollment(demo.email);
+    if (!enrollment) {
+      console.log(`[retell-webhook] No enrollment for ${demo.email}`);
+      return;
+    }
+
+    if (enrollment.phase === 'warm') {
+      console.log(`[retell-webhook] phase=warm → transitionToUltraWarm`);
+      await transitionToUltraWarm(demo.contact_id);
+    } else {
+      console.log(`[retell-webhook] phase=${enrollment.phase} → transitionToWarm`);
+      await transitionToWarm(demo.contact_id);
+    }
 
   } catch (err) {
     console.error('[retell-webhook] Unhandled error:', err);
@@ -2199,21 +2210,21 @@ async function sweepExpired() {
     if (!rows.length) return;
     console.log(`[sweep] ${rows.length} expired demo(s) to tear down`);
     for (const r of rows) {
-      const aRes = await fetch(`${RETELL}/delete-agent/${r.agent_id}`, {
+      const aRes = await fetch(`RETELL/delete-agent/{r.agent_id}`, {
         method  : 'DELETE',
         headers : { Authorization: `Bearer ${RETELL_API_KEY}` },
       }).catch(e => ({ ok: false, status: 0, _err: e.message }));
       if (!aRes.ok && aRes.status !== 404) {
-        console.error(`[sweep] agent delete failed for ${r.slug} (${aRes.status})`);
+        console.error(`[sweep] agent delete failed for r.slug({aRes.status})`);
         continue;
       }
       if (r.llm_id) {
-        const lRes = await fetch(`${RETELL}/delete-retell-llm/${r.llm_id}`, {
+        const lRes = await fetch(`RETELL/delete-retell-llm/{r.llm_id}`, {
           method  : 'DELETE',
           headers : { Authorization: `Bearer ${RETELL_API_KEY}` },
         }).catch(e => ({ ok: false, status: 0, _err: e.message }));
         if (!lRes.ok && lRes.status !== 404) {
-          console.error(`[sweep] llm delete failed for ${r.slug} (${lRes.status})`);
+          console.error(`[sweep] llm delete failed for r.slug({lRes.status})`);
         }
       }
       await db.markAgentDeleted(r.slug);
@@ -2255,7 +2266,7 @@ async function transitionToWarm(contactId) {
     }
 
     if (['completed', 'unsubscribed', 'bounced'].includes(status)) {
-      console.log(`[warm] Contact ${contactId} is "${status}" — skipping warm transition`);
+      console.log(`[warm] Contact contactIdis"{status}" — skipping warm transition`);
       await client.query('ROLLBACK');
       return;
     }
@@ -2299,7 +2310,7 @@ async function markDemoTested(contactId) {
   const DEMO_TESTED_STAGE = 'ad4c1fd7-e0bf-4101-9e1e-3e04a7ec81e2';
 
   // 1. Add tag
-  await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
+  await fetch(`CRMAPI/contacts/{contactId}/tags`, {
     method  : 'POST',
     headers : {
       Authorization  : `Bearer ${CRM_API_KEY}`,
@@ -2312,7 +2323,7 @@ async function markDemoTested(contactId) {
 
   // 2. Find opportunity in the outbound tracking pipeline
   const searchRes = await fetch(
-    `${CRM_API}/opportunities/search?location_id=${CRM_LOCATION_ID}&contact_id=${contactId}&pipeline_id=${PIPELINE_ID}`,
+    `CRMAPI/opportunities/search?locationid={CRM_LOCATION_ID}&contact_id=contactId&pipelineid={PIPELINE_ID}`,
     { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
   );
   const searchData = await searchRes.json();
@@ -2326,7 +2337,7 @@ async function markDemoTested(contactId) {
   const oppId = opps[0].id;
 
   // 3. Move from Demo Active → Demo Tested
-  const updateRes = await fetch(`${CRM_API}/opportunities/${oppId}`, {
+  const updateRes = await fetch(`CRMAPI/opportunities/{oppId}`, {
     method  : 'PUT',
     headers : {
       Authorization  : `Bearer ${CRM_API_KEY}`,
@@ -2348,14 +2359,14 @@ async function restartCleanupWorkflow(contactId) {
     'Version':       '2021-07-28',
   };
 
-  const del = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
+  const del = await fetch(`base/contacts/{contactId}/workflow/${workflowId}`, {
     method: 'DELETE', headers,
   });
   console.log(`[warm] Workflow remove → HTTP ${del.status}`);
 
   await new Promise(r => setTimeout(r, 1500));
 
-  const add = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
+  const add = await fetch(`base/contacts/{contactId}/workflow/${workflowId}`, {
     method: 'POST', headers,
     body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
   });
