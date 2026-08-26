@@ -1962,7 +1962,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   const pHex    = ordered.primary;
   const sHex    = ordered.secondary;
   const palette = computePalette(pHex, sHex);
-  console.log(`[slug] slugpalette:storedp={r.primary_color} s=r.secondarycolor->servingp=#{pHex} s=#${sHex}`);
+  console.log(`[slug] ${slug} palette: stored p=${r.primary_color} s=${r.secondary_color} -> serving p=#${pHex} s=#${sHex}`);
 
 
   // Build an inline-JS snippet that calls setProperty() on <html> immediately.
@@ -1970,7 +1970,7 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
   // cannot be beaten by any stylesheet rule — including the template's
   // hardcoded :root block which would otherwise win over an injected <style>.
   const paletteJs = Object.entries(palette)
-    .map(([k, v]) => `d.style.setProperty(JSON.stringify(k),{JSON.stringify(v)})`)
+    .map(([k, v]) => `d.style.setProperty(${JSON.stringify(k)},${JSON.stringify(v)})`)
     .join(';');
 
 
