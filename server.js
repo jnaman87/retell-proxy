@@ -2415,9 +2415,9 @@ async function restartCleanupWorkflow(contactId) {
   await new Promise(r => setTimeout(r, 15000));
 
   const add = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
-    method: 'POST', headers,
-    body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
-  });
+  method: 'POST', headers,
+  body: JSON.stringify({}),
+});
   console.log(`[ultra_warm] Workflow re-add → HTTP ${add.status}`);
 }
 
