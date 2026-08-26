@@ -124,7 +124,7 @@ async function finaliseNoReply(enrollment) {
       await fetch(`${CRM_API}/opportunities/${opps[0].id}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stageId: STAGE_NO_REPLY }),
+        body: JSON.stringify({ pipelineStageId: STAGE_NO_REPLY }),
       }).catch(e => console.error('[no-reply] stage move failed:', e.message));
     }
 
