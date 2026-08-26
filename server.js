@@ -2358,11 +2358,12 @@ async function transitionToUltraWarm(contactId) {
 }
 
 async function markDemoTested(contactId) {
-  const PIPELINE_ID       = 'NxoKeydZvDnkQEM8u6sy';
-  const DEMO_TESTED_STAGE = 'ad4c1fd7-e0bf-4101-9e1e-3e04a7ec81e2';
+  const CRM_BASE          = 'https://services.leadconnectorhq.com';
+  const PIPELINE_ID       = 'Sv3XlTtCmzbGrHrZ3BFL';
+  const DEMO_TESTED_STAGE = '1a42d192-dc15-4dd0-bd68-f7fef2842dd0';
 
-  // 1. Add tag
-  await fetch(`CRMAPI/contacts/{contactId}/tags`, {
+  // 1. Tag
+  await fetch(`${CRM_BASE}/contacts/${contactId}/tags`, {
     method  : 'POST',
     headers : {
       Authorization  : `Bearer ${CRM_API_KEY}`,
@@ -2370,35 +2371,35 @@ async function markDemoTested(contactId) {
       'Content-Type' : 'application/json',
     },
     body: JSON.stringify({ tags: ['aivoice_agent_tested'] }),
-  }).then(r => console.log(`[warm] Tag aivoice_agent_tested → HTTP ${r.status}`))
-    .catch(e => console.error('[warm] Tag error:', e.message));
+  }).then(r => console.log(`[ultra_warm] Tag → HTTP ${r.status}`))
+    .catch(e => console.error('[ultra_warm] Tag error:', e.message));
 
-  // 2. Find opportunity in the outbound tracking pipeline
+  // 2. Find Conversions pipeline opportunity
   const searchRes = await fetch(
-    `CRMAPI/opportunities/search?locationid={CRM_LOCATION_ID}&contact_id=contactId&pipelineid={PIPELINE_ID}`,
+    `${CRM_BASE}/opportunities/search?location_id=${CRM_LOCATION_ID}&contact_id=${contactId}&pipeline_id=${PIPELINE_ID}`,
     { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
   );
   const searchData = await searchRes.json();
   const opps = searchData.opportunities || [];
 
   if (!opps.length) {
-    console.log(`[warm] No opportunity found in outbound pipeline for contact ${contactId}`);
+    console.log(`[ultra_warm] No opportunity in Conversions pipeline for ${contactId}`);
     return;
   }
 
   const oppId = opps[0].id;
 
-  // 3. Move from Demo Active → Demo Tested
-  const updateRes = await fetch(`CRMAPI/opportunities/{oppId}`, {
+  // 3. Move → Demo Tested
+  const updateRes = await fetch(`${CRM_BASE}/opportunities/${oppId}`, {
     method  : 'PUT',
     headers : {
       Authorization  : `Bearer ${CRM_API_KEY}`,
       Version        : '2021-07-28',
       'Content-Type' : 'application/json',
     },
-    body: JSON.stringify({ stageId: DEMO_TESTED_STAGE }),
+    body: JSON.stringify({ pipelineStageId: DEMO_TESTED_STAGE }),
   });
-  console.log(`[warm] Opportunity ${oppId} → Demo Tested HTTP ${updateRes.status}`);
+  console.log(`[ultra_warm] Opportunity ${oppId} → Demo Tested HTTP ${updateRes.status}`);
 }
 
 async function restartCleanupWorkflow(contactId) {
@@ -2406,23 +2407,23 @@ async function restartCleanupWorkflow(contactId) {
   const apiKey     = process.env.CRM_API_KEY;
   const base       = 'https://services.leadconnectorhq.com';
   const headers    = {
-    'Authorization': `Bearer ${apiKey}`,
-    'Content-Type':  'application/json',
-    'Version':       '2021-07-28',
+    Authorization  : `Bearer ${apiKey}`,
+    'Content-Type' : 'application/json',
+    Version        : '2021-07-28',
   };
 
-  const del = await fetch(`base/contacts/{contactId}/workflow/${workflowId}`, {
+  const del = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
     method: 'DELETE', headers,
   });
-  console.log(`[warm] Workflow remove → HTTP ${del.status}`);
+  console.log(`[ultra_warm] Workflow remove → HTTP ${del.status}`);
 
   await new Promise(r => setTimeout(r, 1500));
 
-  const add = await fetch(`base/contacts/{contactId}/workflow/${workflowId}`, {
+  const add = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
     method: 'POST', headers,
     body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
   });
-  console.log(`[warm] Workflow re-add → HTTP ${add.status}`);
+  console.log(`[ultra_warm] Workflow re-add → HTTP ${add.status}`);
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
