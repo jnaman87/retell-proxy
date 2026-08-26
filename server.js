@@ -2412,7 +2412,7 @@ async function restartCleanupWorkflow(contactId) {
   });
   console.log(`[ultra_warm] Workflow remove → HTTP ${del.status}`);
 
-  await new Promise(r => setTimeout(r, 5000));
+  await new Promise(r => setTimeout(r, 15000));
 
   const add = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
     method: 'POST', headers,
