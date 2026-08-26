@@ -106,8 +106,20 @@ async function createConversionOpportunity(contactId, companyName) {
         contactId,
       }),
     });
-    if (!r.ok) console.error('[detect] conversion opp create failed:', r.status, await r.text());
-    else console.log(`[detect] ✅ Conversions opportunity created → Demo Sent for ${companyName}`);
+    const d = await r.json();
+    if (!r.ok) {
+      console.error('[detect] conversion opp create failed:', r.status, JSON.stringify(d));
+      return;
+    }
+    console.log(`[detect] ✅ Conversions opportunity created → Demo Sent for ${companyName}`);
+
+    const oppId = d.opportunity && d.opportunity.id;
+    if (oppId) {
+      await pool.query(
+        'UPDATE enrollments SET conversions_opp_id = $1 WHERE contact_id = $2',
+        [oppId, contactId]
+      );
+    }
   } catch (e) {
     console.error('[detect] conversion opp error:', e.message);
   }
