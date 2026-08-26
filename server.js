@@ -2376,9 +2376,9 @@ async function markDemoTested(contactId) {
 
   // 2. Find Conversions pipeline opportunity
   const searchRes = await fetch(
-    `${CRM_BASE}/opportunities/search?location_id=${CRM_LOCATION_ID}&contact_id=${contactId}&pipeline_id=${PIPELINE_ID}`,
-    { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
-  );
+  `${CRM_BASE}/opportunities/search?location_id=${process.env.CRM_LOCATION_ID}&contact_id=${contactId}&pipeline_id=${PIPELINE_ID}`,
+  { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
+);
   const searchData = await searchRes.json();
   const opps = searchData.opportunities || [];
 
@@ -2417,7 +2417,7 @@ async function restartCleanupWorkflow(contactId) {
   });
   console.log(`[ultra_warm] Workflow remove → HTTP ${del.status}`);
 
-  await new Promise(r => setTimeout(r, 1500));
+  await new Promise(r => setTimeout(r, 5000));
 
   const add = await fetch(`${base}/contacts/${contactId}/workflow/${workflowId}`, {
     method: 'POST', headers,
