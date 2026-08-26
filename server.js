@@ -2247,7 +2247,7 @@ async function transitionToWarm(contactId) {
     await client.query('BEGIN');
 
     const { rows } = await client.query(
-      `SELECT id, niche, status FROM enrollments WHERE contact_id = $1 LIMIT 1`,
+      `SELECT id, phase, niche, status FROM enrollments WHERE contact_id = $1 LIMIT 1`,
       [contactId]
     );
 
@@ -2257,29 +2257,27 @@ async function transitionToWarm(contactId) {
       return;
     }
 
-    const { niche, status } = rows[0];
+    const { phase, status } = rows[0];
 
-    if (niche === 'warm') {
+    if (phase === 'warm') {
       console.log(`[warm] Contact ${contactId} already in warm sequence — skipping`);
       await client.query('ROLLBACK');
       return;
     }
 
     if (['completed', 'unsubscribed', 'bounced'].includes(status)) {
-      console.log(`[warm] Contact contactIdis"{status}" — skipping warm transition`);
+      console.log(`[warm] Contact ${contactId} is "${status}" — skipping warm transition`);
       await client.query('ROLLBACK');
       return;
     }
 
     await client.query(
       `UPDATE enrollments
-       SET niche            = 'warm',
+       SET phase            = 'warm',
            step             = 0,
            status           = 'active',
            next_send_at     = NOW(),
-           last_sent_at     = NULL,
-           thread_id        = NULL,
-           last_message_id  = NULL
+           last_sent_at     = NULL
        WHERE contact_id = $1`,
       [contactId]
     );
@@ -2287,14 +2285,64 @@ async function transitionToWarm(contactId) {
     await client.query('COMMIT');
     console.log(`[warm] Contact ${contactId} transitioned → warm sequence`);
 
-    // Tag + stage move in GHL (fire-and-forget)
-    markDemoTested(contactId).catch(err =>
-      console.error('[warm] markDemoTested failed:', err)
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function transitionToUltraWarm(contactId) {
+  const client = await emailPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `SELECT id, phase, status FROM enrollments WHERE contact_id = $1 LIMIT 1`,
+      [contactId]
     );
 
-    // Restart 7-day cleanup countdown
+    if (!rows.length) {
+      console.log(`[ultra_warm] No enrollment for contact ${contactId}`);
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    const { phase, status } = rows[0];
+
+    if (phase === 'ultra_warm') {
+      console.log(`[ultra_warm] Contact ${contactId} already in ultra_warm — skipping`);
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    if (['completed', 'unsubscribed', 'bounced'].includes(status)) {
+      console.log(`[ultra_warm] Contact ${contactId} is "${status}" — skipping`);
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    await client.query(
+      `UPDATE enrollments
+       SET phase        = 'ultra_warm',
+           step         = 0,
+           status       = 'active',
+           next_send_at = NOW(),
+           last_sent_at = NULL
+       WHERE contact_id = $1`,
+      [contactId]
+    );
+
+    await client.query('COMMIT');
+    console.log(`[ultra_warm] Contact ${contactId} transitioned → ultra_warm sequence`);
+
+    markDemoTested(contactId).catch(err =>
+      console.error('[ultra_warm] markDemoTested failed:', err)
+    );
+
     restartCleanupWorkflow(contactId).catch(err =>
-      console.error('[warm] GHL workflow restart failed:', err)
+      console.error('[ultra_warm] workflow restart failed:', err)
     );
 
   } catch (err) {
