@@ -22,7 +22,7 @@ const MAILBOX_PERSONAS = {
   'mike@cretivecopyz.com'           : { fullName: 'Mike Ten',       title: 'Senior Account Manager' },
   'phil@creativecopyz.net'    : { fullName: 'Phil Jazz',      title: 'Partnership Director' },
   'samuel@creativecopyz.net'         : { fullName: 'Samuel Borne',   title: 'AI Solutions Advisor' },
-  'vanessa@creativecopyz.ne' : { fullName: 'Vanessa Cruz',   title: 'Client Relations Manager' },
+  'vanessa@creativecopyz.net' : { fullName: 'Vanessa Cruz',   title: 'Client Relations Manager' },
 };
 
 function getPersona(mailbox) {
