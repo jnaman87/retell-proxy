@@ -21,7 +21,7 @@ const MAILBOX_PERSONAS = {
   'james@ccopyz.net'          : { fullName: 'James Walkway',  title: 'Head of AI Outreach' },
   'josh@ccopyz.net'           : { fullName: 'Josh Walker',    title: 'Account Executive' },
   'joshua@cretivecopyz.com'   : { fullName: 'Joshua Speed',   title: 'Business Development Lead' },
-  'justin@cretivecopyz.com'   : { fullName: 'Justin Albus',   title: 'Director of Sales' },
+' justin@cretivecopyz.com'   : { fullName: 'Justin Albus',   title: 'Director of Sales' },
   'mike@cretivecopyz.com'     : { fullName: 'Mike Ten',       title: 'Senior Account Manager' },
   'phil@creativecopyz.net'    : { fullName: 'Phil Jazz',      title: 'Partnership Director' },
   'samuel@creativecopyz.net'  : { fullName: 'Samuel Borne',   title: 'AI Solutions Advisor' },
