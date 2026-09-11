@@ -252,6 +252,13 @@ async function detectRepliesAndBounces() {
           );
           if (!enr.length) continue;
           const enrollment = enr[0];
+          // Dedup: skip if this Gmail message was already processed
+          const lastProspect = enrollment.conversation_history?.slice().reverse().find(h => h.role === 'prospect');
+          const currentContent = 'Subject: ' + msg.subject + '\n' + msg.snippet;
+          if (lastProspect && ((lastProspect.msgId && lastProspect.msgId === msg.id) || lastProspect.content === currentContent)) {
+              console.log('[detect] ' + enrollment.prospect_email + ' -- duplicate message, skipping');
+              continue;
+          }
 
           // Warm / ultra_warm: classify first, route to negative handler or conversational AI
           if (enrollment.phase === 'warm' || enrollment.phase === 'ultra_warm') {
