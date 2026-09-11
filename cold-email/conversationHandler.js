@@ -124,7 +124,7 @@ async function handleConversationalReply(enrollment, msg) {
   const history  = Array.isArray(enrollment.conversation_history) ? enrollment.conversation_history : [];
   const withIncoming = [
     ...history,
-    { role: 'prospect', content: 'Subject: ' + msg.subject + '\n' + msg.snippet, timestamp: new Date().toISOString(), phase: enrollment.phase },
+    { role: 'prospect', content: 'Subject: ' + msg.subject + '\n' + msg.snippet, timestamp: new Date().toISOString(), phase: enrollment.phase , msgId: msg.id },
   ];
   let aiResult;
   try {
