@@ -195,19 +195,19 @@ async function sendConvFollowUp(enrollment) {
     return;
   }
   if (!replyText) return;
+  const cleanFollowUp = cleanReplyFormatting(replyText);
   const history     = Array.isArray(enrollment.conversation_history) ? enrollment.conversation_history : [];
   const lastSubject = history.filter(h => h.role === 'prospect').slice(-1)[0]?.content?.split('\n')[0]?.replace('Subject: ', '') || 'our conversation';
   let sendResult;
   try {
-    sendResult = await sendInThread(enrollment, lastSubject, replyText);
+    sendResult = await sendInThread(enrollment, lastSubject, cleanFollowUp); 
   } catch (e) {
     console.error('[conv] followup send failed for ' + enrollment.prospect_email + ':', e.message);
     return;
   }
   const updatedHistory = [
     ...history,
-    { role: 'assistant', content: replyText, timestamp: new Date().toISOString(), type: 'followup' },
-  ];
+  { role: 'assistant', content: cleanFollowUp, timestamp: new Date().toISOString(), type: 'followup' },  ];
   await pool.query(
     'UPDATE enrollments SET conversation_history = $1::jsonb, last_message_id = $2,' +
     ' last_conv_at = NOW(), conv_followup_at = NOW() + INTERVAL \'' + FOLLOWUP_DAYS + ' days\' WHERE id = $3',
