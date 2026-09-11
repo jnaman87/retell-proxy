@@ -73,6 +73,8 @@ function replySystemPrompt(enrollment, persona) {
     '- Body: 2 to 4 sentences, no filler phrases',
     '- If the prospect agrees to a call or asks to book, set sendCalLink to true and include this link naturally: ' + CALENDAR_LINK,
     '- Do not repeat the link if they already have it unless they ask',
+    '- Always end your reply with an open-ended question -- invite them to book the onboarding call, ask about their current setup, their biggest challenge answering calls, or what they would like to know more about.',
+    '- Never break a sentence across multiple lines. Only start a new paragraph after a full stop, question mark, or exclamation mark. Do not insert a line break mid-sentence.',
     '',
     'CONTEXT:',
     '- Company: ' + (enrollment.company_name || 'their business') + ' (' + (enrollment.niche || '') + ')',
@@ -97,6 +99,8 @@ function followUpSystemPrompt(enrollment, persona) {
     '- Sign-off must be exactly: ' + persona.fullName + '\n' + persona.title + ' | Creative Copyz',
     '- Body: 2 to 3 sentences maximum',
     '- Include booking link: ' + CALENDAR_LINK,
+    '- Always end your reply with an open-ended question -- invite them to confirm the booking, ask if a different time works, or if they have any questions.',
+    '- Never break a sentence across multiple lines. Only start a new paragraph after a full stop, question mark, or exclamation mark.',
     '',
     'Respond ONLY with valid JSON: {"reply": "full email text"}',
   ].join('\n');
@@ -118,6 +122,23 @@ async function sendInThread(enrollment, subject, body) {
   });
 }
 
+// Post-process AI reply: join lines that break mid-sentence
+function cleanReplyFormatting(text) {
+    if (!text) return text;
+    const lines = text.split('\n');
+    const result = []; let buffer = '';
+    for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) { if (buffer) { result.push(buffer); buffer = ''; } result.push(''); continue; }
+          if (buffer) {
+                  if (/[.?!]$/.test(buffer.trimEnd())) { result.push(buffer); buffer = trimmed; }
+                  else { buffer = buffer.trimEnd() + ' ' + trimmed; }
+                } else { buffer = trimmed; }
+    }
+    if (buffer) result.push(buffer);
+    while (result.length && !result[result.length - 1]) result.pop();
+    return result.join('\n');
+}
 // Main: handle an incoming reply conversationally
 async function handleConversationalReply(enrollment, msg) {
   const persona  = getPersona(enrollment.mailbox);
@@ -137,17 +158,17 @@ async function handleConversationalReply(enrollment, msg) {
     return;
   }
   if (!aiResult.reply) { console.error('[conv] empty reply for ' + enrollment.prospect_email); return; }
+  const cleanReply = cleanReplyFormatting(aiResult.reply);
   let sendResult;
   try {
-    sendResult = await sendInThread(enrollment, msg.subject, aiResult.reply);
+    sendResult = await sendInThread(enrollment, msg.subject, cleanReply); 
   } catch (e) {
     console.error('[conv] send failed for ' + enrollment.prospect_email + ':', e.message);
     return;
   }
   const finalHistory = [
     ...withIncoming,
-    { role: 'assistant', content: aiResult.reply, timestamp: new Date().toISOString(), phase: enrollment.phase },
-  ];
+  { role: 'assistant', content: cleanReply, timestamp: new Date().toISOString(), phase: enrollment.phase },  ];
   const newConvStatus = aiResult.sendCalLink ? 'calendar_sent' : 'active';
   await pool.query(
     'UPDATE enrollments SET status = $1, conversation_history = $2::jsonb, conv_status = $3,' +
