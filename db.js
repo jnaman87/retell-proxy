@@ -158,6 +158,11 @@ async function releaseCall(agentId) {
     `UPDATE demos SET calls_used = GREATEST(calls_used - 1, 0) WHERE agent_id = $1`,
     [agentId]
   );
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS conversation_history JSONB DEFAULT '[]'::jsonb`).catch(e => console.warn('[db] conversation_history migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS conv_status TEXT`).catch(e => console.warn('[db] conv_status migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS calendar_sent_at TIMESTAMPTZ`).catch(e => console.warn('[db] calendar_sent_at migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS last_conv_at TIMESTAMPTZ`).catch(e => console.warn('[db] last_conv_at migration skipped:', e.message));
+  await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS conv_followup_at TIMESTAMPTZ`).catch(e => console.warn('[db] conv_followup_at migration skipped:', e.message));
 }
 
 // ─── Cleanup support ─────────────────────────────────────────────────────────
