@@ -1,6 +1,7 @@
 'use strict';
 const pool          = require('./pool');
 const { sendEmail } = require('./gmail-sender');
+const { sendConvFollowUp } = require('./conversationHandler');
 const SEQUENCES     = require('./sequence');
 
 // ─── Mailbox personas ──────────────────────────────────────────
@@ -269,6 +270,21 @@ async function runSendLoop() {
       } catch (err) {
         console.error(`[loop] send failed for ${enrollment.prospect_email}:`, err.message);
       }
+    }
+    
+    // Conversation follow-ups: nudge leads who got calendar link but haven't replied or booked
+    const convDue = await pool.query(
+      `SELECT * FROM enrollments
+       WHERE conv_status = 'calendar_sent'
+         AND conv_followup_at <= NOW()
+         AND status NOT IN ('unsubscribed', 'bounced', 'completed')
+       LIMIT 3`
+    );
+    for (const enrollment of convDue.rows) {
+      if (!isInSendWindow(enrollment.prospect_tz)) continue;
+      console.log(`[loop] conv follow-up -> ${enrollment.prospect_email}`);
+      await sendConvFollowUp(enrollment);
+      await sleep(DRIP_DELAY_MS);
     }
   } catch (err) {
     console.error('[loop] query error:', err.message);
