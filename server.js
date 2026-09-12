@@ -1958,15 +1958,20 @@ app.post('/webhook/call-booked', async (req, res) => {
 });
 
 
+let _detectInProgress = false;
 app.post('/gmail-webhook', express.json(), async (req, res) => {
-  res.sendStatus(200); // ACK to Pub/Sub immediately — must be fast
+  res.sendStatus(200);
   try {
+    if (_detectInProgress) return; // skip if already running
+    _detectInProgress = true;
     const msg = req.body && req.body.message;
     if (!msg) return;
     const decoded = JSON.parse(Buffer.from(msg.data, 'base64').toString());
     console.log('[webhook] push for', decoded.emailAddress);
     await detectRepliesAndBounces();
+    _detectInProgress = false;
   } catch (e) {
+    _detectInProgress = false;
     console.error('[webhook] error:', e.message);
   }
 });
