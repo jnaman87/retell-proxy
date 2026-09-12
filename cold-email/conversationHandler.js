@@ -115,21 +115,13 @@ async function sendInThread(enrollment, subject, body) {
     fromName : persona.fullName,
     to       : enrollment.prospect_email,
     subject  : sub,
-    body     : body + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".',
+    body     : body + '<hr style="border:none;border-top:1px solid #eee;margin:20px 0;"><p style="color:#999;font-size:11px;margin:0;">To stop receiving these emails, reply with "unsubscribe".</p>',
     threadId : enrollment.thread_id,
     inReplyTo: enrollment.last_message_id,
     references: enrollment.last_message_id,
   });
 }
 
-function toHtmlEmail(text) {
-  const paragraphs = text
-    .split('\n\n')
-    .map(p => p.replace(/\n/g, '<br>'))
-    .map(p => `<p style="margin:0 0 14px 0;line-height:1.6;">${p}</p>`)
-    .join('');
-  return `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333;max-width:600px;">${paragraphs}</div>`;
-}
 // Post-process AI reply: join lines that break mid-sentence
 function cleanReplyFormatting(text) {
   if (!text) return text;
@@ -152,6 +144,15 @@ function cleanReplyFormatting(text) {
   if (buffer) paragraphs.push(buffer);
   return paragraphs.join('\n\n');
 }
+function toHtmlEmail(text) {
+  const paragraphs = text
+    .split('\n\n')
+    .map(p => p.replace(/\n/g, '<br>'))
+    .map(p => `<p style="margin:0 0 14px 0;line-height:1.6;">${p}</p>`)
+    .join('');
+  return `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333;max-width:600px;">${paragraphs}</div>`;
+}
+
 // Main: handle an incoming reply conversationally
 async function handleConversationalReply(enrollment, msg) {
   const persona  = getPersona(enrollment.mailbox);
@@ -171,9 +172,9 @@ async function handleConversationalReply(enrollment, msg) {
     return;
   }
   if (!aiResult.reply) { console.error('[conv] empty reply for ' + enrollment.prospect_email); return; }
-  const signOff  = `${persona.fullName}\n${persona.title} | Creative Copyz`;
-const plainText = cleanReplyFormatting(aiResult.reply) + '\n\n' + signOff;
-const cleanReply = toHtmlEmail(plainText);
+  const rawReply  = (aiResult.reply || '').replace(/^((Hi|Hello|Dear)\s+\w+[,!]?)\s+/m, '$1\n\n');
+const signOff   = `${persona.fullName}\n${persona.title} | Creative Copyz`;
+const cleanReply = toHtmlEmail(cleanReplyFormatting(rawReply) + '\n\n' + signOff);
   let sendResult;
   try {
     sendResult = await sendInThread(enrollment, msg.subject, cleanReply); 
@@ -210,8 +211,9 @@ async function sendConvFollowUp(enrollment) {
     return;
   }
   if (!replyText) return;
-  const signOff     = `${persona.fullName}\n${persona.title} | Creative Copyz`;
-const cleanFollowUp = cleanReplyFormatting(replyText) + '\n\n' + signOff;
+  const rawFollowUp   = (replyText || '').replace(/^((Hi|Hello|Dear)\s+\w+[,!]?)\s+/m, '$1\n\n');
+const signOff       = `${persona.fullName}\n${persona.title} | Creative Copyz`;
+const cleanFollowUp = toHtmlEmail(cleanReplyFormatting(rawFollowUp) + '\n\n' + signOff);
   const history     = Array.isArray(enrollment.conversation_history) ? enrollment.conversation_history : [];
   const lastSubject = history.filter(h => h.role === 'prospect').slice(-1)[0]?.content?.split('\n')[0]?.replace('Subject: ', '') || 'our conversation';
   let sendResult;
