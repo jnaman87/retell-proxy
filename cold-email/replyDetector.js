@@ -70,7 +70,7 @@ async function findOpportunity(contactId, pipelineId) {
       `${CRM_API}/opportunities/search?location_id=${LOCATION_ID}&contact_id=${contactId}&pipeline_id=${pipelineId}`,
       { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
     );
-    const d = await r.json();
+    const rtext = await r.text(); let d = {}; try { if (rtext) d = JSON.parse(rtext); } catch {}
     return (d.opportunities && d.opportunities[0]) || null;
   } catch (e) {
     console.error('[detect] opp search error:', e.message);
@@ -178,8 +178,7 @@ async function handlePositive(enrollment, msg) {
   if (!demoUrl) { console.error(`[detect] demo build failed for ${prospect_email}`); return; }
   await pool.query(
     `UPDATE enrollments SET positive_reply_at = NOW(), phase = 'warm', step = 0,
-     status = 'active', next_send_at = NOW() + INTERVAL '2 minutes', demo_page_url = $2 WHERE id = $1`,
-    [enrollment.id, demoUrl]
+     status = 'active', next_send_at = NOW() + INTERVAL '2 minutes', demo_page_url = $2, conversation_history = $3::jsonb WHERE id = $1`, [enrollment.id, demoUrl, JSON.stringify([...(Array.isArray(enrollment.conversation_history)?enrollment.conversation_history:[]),{role:'prospect',content:'Subject: '+msg.subject+'\n'+msg.snippet,timestamp:new Date().toISOString(),phase:'cold',msgId:msg.id}])]
   );
   await tagContact(contact_id, 'aivoice_demo_sent');
   await addNote(contact_id,
@@ -253,12 +252,13 @@ async function detectRepliesAndBounces() {
           if (!enr.length) continue;
           const enrollment = enr[0];
           // Dedup: skip if this Gmail message was already processed
-          const lastProspect = enrollment.conversation_history?.slice().reverse().find(h => h.role === 'prospect');
-          const currentContent = 'Subject: ' + msg.subject + '\n' + msg.snippet;
-          if (lastProspect && ((lastProspect.msgId && lastProspect.msgId === msg.id) || lastProspect.content === currentContent)) {
-              console.log('[detect] ' + enrollment.prospect_email + ' -- duplicate message, skipping');
-              continue;
-          }
+          const processedIds = new Set((enrollment.conversation_history || []).filter(h => h.role === 'prospect' && h.msgId).map(h => h.msgId));
+const lastProspect = (enrollment.conversation_history || []).slice().reverse().find(h => h.role === 'prospect');
+const currentContent = 'Subject: ' + msg.subject + '\n' + msg.snippet;
+if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === currentContent)) {
+  console.log('[detect] ' + enrollment.prospect_email + ' -- duplicate message, skipping');
+  continue;
+}
 
           // Warm / ultra_warm: classify first, route to negative handler or conversational AI
           if (enrollment.phase === 'warm' || enrollment.phase === 'ultra_warm') {
