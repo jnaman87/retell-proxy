@@ -17,7 +17,8 @@
     "pg": "^8.11.0",
     "google-auth-library": "^9.0.0",
   "retell-client-js-sdk": "^2.0.5",
-"esbuild": "^0.24.0"
+"esbuild": "^0.24.0",
+    "googleapis": "^144.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
