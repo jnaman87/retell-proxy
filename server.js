@@ -857,6 +857,47 @@ function computePalette(primaryHex, secondaryHex) {
     '--td': 'rgba(240,240,240,.20)',
   };
 }
+
+app.post('/enroll', express.json(), async (req, res) => {
+  try {
+    const b   = req.body || {};
+    const raw = { ...b, ...(b.contact || {}), ...(b.customData || {}) };
+
+    const email = raw.email || raw.Email;
+    if (!email) return res.status(400).json({ error: 'email is required' });
+
+    const firstName   = raw.firstName   || raw.first_name  || '';
+    const lastName    = raw.lastName    || raw.last_name   || '';
+    const companyName = cleanBusinessName(raw.companyName || raw.businessName || raw.business_name || '');
+
+    const result = await db.enroll({
+      contactId   : raw.contactId    || raw.contact_id || raw.id,
+      email,
+      name        : `${firstName} ${lastName}`.trim(),
+      city        : raw.city         || raw.City       || '',
+      tz          : raw.timezone     || raw.tz         || 'America/New_York',
+      niche       : raw.niche        || raw.Niche      || 'general',
+      companyName,
+      hook        : raw.personalisationHook || raw.personalisation_hook || '',
+      pain        : raw.currentPain         || raw.current_pain         || '',
+      services    : raw.coreServices        || raw.core_services        || '',
+      tagline     : raw.tagline || '',
+    });
+
+    if (result.duplicate) {
+      console.log(`[enroll] Already enrolled: ${email} → id ${result.enrollmentId}`);
+      return res.json({ success: false, message: 'Already enrolled', enrollmentId: result.enrollmentId });
+    }
+
+    console.log(`[enroll] ✅ id=${result.enrollmentId} ${email} (${companyName || 'no company'})`);
+    return res.json({ success: true, enrollmentId: result.enrollmentId });
+
+  } catch (e) {
+    console.error('[enroll] error:', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-agent
 // ─────────────────────────────────────────────────────────────────────────────
