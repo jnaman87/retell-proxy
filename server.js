@@ -2280,6 +2280,21 @@ if (saKeys.length > 0) {
   // Gmail Push: watch all mailboxes so Pub/Sub gets notified on new emails
 const PUBSUB_TOPIC = 'projects/aivoice-gmail-mailer-504813/topics/gmail-push-notifications';
 
+function getServiceAccountKey(email) {
+  const domain = email.split('@')[1];
+  const envMap = {
+    'ccopyz.net'       : process.env.GOOGLE_SA_CCOPYZ_NET,
+    'ccopyz.com'       : process.env.GOOGLE_SA_CCOPYZ_COM,
+    'ccopyz.org'       : process.env.GOOGLE_SA_CCOPYZ_ORG,
+    'creativecopyz.net': process.env.GOOGLE_SA_CREATIVECOPYZ_NET,
+    'creativecopyz.org': process.env.GOOGLE_SA_CREATIVECOPYZ_ORG,
+    'cretivecopyz.com' : process.env.GOOGLE_SA_CRETIVECOPYZ_COM,
+  };
+  const raw = envMap[domain];
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
 async function watchMailbox(email) {
   try {
     const saKey = getServiceAccountKey(email);
