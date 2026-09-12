@@ -169,26 +169,35 @@ async function buildDemoForEnrollment(enrollment) {
 
 // Handle positive cold reply (build demo, start warm sequence)
 async function handlePositive(enrollment, msg) {
-  const { contact_id, prospect_email, company_name } = enrollment;
+  const { contact_id, prospect_email } = enrollment;
   if (enrollment.positive_reply_at) {
     console.log(`[detect] duplicate positive reply for ${prospect_email} -- skipping`);
     return;
   }
-  const demoUrl = await buildDemoForEnrollment(enrollment);
-  if (!demoUrl) { console.error(`[detect] demo build failed for ${prospect_email}`); return; }
+
+  // Store reply in history, mark positive_reply_at — do NOT build demo yet
+  const updatedHistory = [
+    ...(Array.isArray(enrollment.conversation_history) ? enrollment.conversation_history : []),
+    { role: 'prospect', content: 'Subject: ' + msg.subject + '\n' + msg.snippet,
+      timestamp: new Date().toISOString(), phase: 'cold', msgId: msg.id }
+  ];
   await pool.query(
-    `UPDATE enrollments SET positive_reply_at = NOW(), phase = 'warm', step = 0,
-     status = 'active', next_send_at = NOW() + INTERVAL '2 minutes', demo_page_url = $2, conversation_history = $3::jsonb WHERE id = $1`, [enrollment.id, demoUrl, JSON.stringify([...(Array.isArray(enrollment.conversation_history)?enrollment.conversation_history:[]),{role:'prospect',content:'Subject: '+msg.subject+'\n'+msg.snippet,timestamp:new Date().toISOString(),phase:'cold',msgId:msg.id}])]
+    `UPDATE enrollments SET positive_reply_at = NOW(), status = 'replied',
+     conversation_history = $2::jsonb WHERE id = $1`,
+    [enrollment.id, JSON.stringify(updatedHistory)]
   );
-  await tagContact(contact_id, 'aivoice_demo_sent');
+
+  // CRM — tag + move to Reply Received (not Demo Sent)
+  await tagContact(contact_id, 'aivoice_reply_received');
   await addNote(contact_id,
-    `Positive reply to cold email.\nReplied to: ${msg.from}\nSubject: ${msg.subject}\n\nReply preview:\n${msg.snippet}\n\nDemo: ${demoUrl}\nEnrolled in warm sequence.`);
+    `Positive reply to cold email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply:\n${msg.snippet}`
+  );
   const otOpp = await findOpportunity(contact_id, OT_PIPELINE);
-  if (otOpp) await moveOpportunity(otOpp.id, OT_DEMO_SENT);
-  const cvOpp = await findOpportunity(contact_id, CV_PIPELINE);
-  if (cvOpp) await moveOpportunity(cvOpp.id, CV_DEMO_SENT);
-  else await createConversionOpportunity(contact_id, company_name);
-  console.log(`[detect] ${prospect_email} -> positive reply, demo built, warm sequence started`);
+  if (otOpp) await moveOpportunity(otOpp.id, OT_REPLY_RECEIVED);
+
+  // Hand off to conversational AI — it decides demo vs direct booking
+  await handleConversationalReply({ ...enrollment, conversation_history: updatedHistory }, msg);
+  console.log(`[detect] ${prospect_email} -> positive cold reply, conversational AI engaged`);
 }
 
 // Handle negative/unsubscribe (all phases)
@@ -251,6 +260,12 @@ async function detectRepliesAndBounces() {
           );
           if (!enr.length) continue;
           const enrollment = enr[0];
+          const msgTs     = msg.internalDate ? Number(msg.internalDate) : msg.date ? new Date(msg.date).getTime() : null;
+const enrolledTs = enrollment.enrolled_at ? new Date(enrollment.enrolled_at).getTime() : null;
+if (msgTs && enrolledTs && msgTs < enrolledTs) {
+  console.log(`[detect] ${enrollment.prospect_email} -- message predates enrollment, skipping`);
+  continue;
+}
           // Dedup: skip if this Gmail message was already processed
           const processedIds = new Set((enrollment.conversation_history || []).filter(h => h.role === 'prospect' && h.msgId).map(h => h.msgId));
 const lastProspect = (enrollment.conversation_history || []).slice().reverse().find(h => h.role === 'prospect');
