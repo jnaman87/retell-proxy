@@ -199,7 +199,7 @@ module.exports = {
   init, slugTaken, createDemo, getBySlug, getByAgentId,
   reserveCall, releaseCall,
   listExpiredUndeleted, markAgentDeleted, stats,
-  pool,
+  pool, enroll,
 };
 
 
