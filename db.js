@@ -201,3 +201,26 @@ module.exports = {
   listExpiredUndeleted, markAgentDeleted, stats,
   pool,
 };
+
+
+async function enroll({ contactId, email, name, city, tz, niche, companyName, hook, pain, services, tagline }) {
+  // Dedup check
+  const existing = await pool.query(
+    "SELECT id FROM enrollments WHERE prospect_email=$1 AND status NOT IN ('completed','unsubscribed','bounced')",
+    [email]
+  );
+  if (existing.rows.length > 0) {
+    return { duplicate: true, enrollmentId: existing.rows[0].id };
+  }
+  // Insert
+  const result = await pool.query(
+    `INSERT INTO enrollments
+     (contact_id, prospect_email, prospect_name, prospect_city, prospect_tz,
+      niche, company_name, personalisation_hook, current_pain, core_services, tagline,
+      phase, step, status, next_send_at, enrolled_at, conversation_history)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'cold',0,'active',NOW(),NOW(),'[]'::jsonb)
+     RETURNING id`,
+    [contactId, email, name, city, tz, niche, companyName, hook, pain, services, tagline]
+  );
+  return { duplicate: false, enrollmentId: result.rows[0].id };
+}
