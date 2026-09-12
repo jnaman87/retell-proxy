@@ -693,7 +693,7 @@ async function getCrmFieldMap() {
   if (crmFieldMap) return crmFieldMap;
   try {
     const r = await fetch(
-      `CRMAPI/locations/{CRM_LOCATION_ID}/customFields`,
+      `https://services.leadconnectorhq.com/locations/${process.env.CRM_LOCATION_ID || 'dImqkGzlWhmVksSXL1WY'}/customFields`,
       { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
     );
     const d = await r.json();
@@ -935,9 +935,9 @@ app.post('/create-agent', async (req, res) => {
     );
 
 
-    console.log(`[create-agent] niche="niche"business="{rawName}" city="${city}"`);
-    console.log(`[create-agent] coreServices="coreServices"callerFaqs="{callerFaqs}"`);
-    console.log(`[create-agent] 🎨 primaryColor="primaryColor"secondaryColor="{secondaryColor}"`);
+    console.log(`[create-agent] niche="${niche}" business="${rawName}" city="${city}"`);
+console.log(`[create-agent] coreServices="${coreServices}" callerFaqs="${callerFaqs}"`);
+console.log(`[create-agent] primaryColor="${primaryColor}" secondaryColor="${secondaryColor}"`);
     console.log(`[create-agent] 📦 raw keys: ${Object.keys(raw).join(', ')}`);
 
 
@@ -1081,7 +1081,7 @@ app.post('/create-agent', async (req, res) => {
     const agentData = await agentRes.json();
     const slug      = await generateSlug(businessName, city);
     const DEMO_BASE = process.env.DEMO_BASE_URL || 'https://demo.creativecopyz.com';
-    const demoUrl   = `DEMOBASE/{slug}`;
+    const demoUrl = `${DEMO_BASE}/${slug}`;
 
 
     await db.createDemo({
@@ -1101,31 +1101,6 @@ app.post('/create-agent', async (req, res) => {
 
 
     console.log(`[create-agent] ✅ ${slug} → ${agentData.agent_id}`);
-
-    // ── Enroll in cold email sequence ──────────────────────────────────────────
-const prospectEmail = pick('email', 'Email', 'contact_email');
-if (prospectEmail) {
-  emailPool.query(
-    `INSERT INTO enrollments
-       (contact_id, prospect_email, prospect_name, prospect_city, prospect_tz,
-        niche, company_name, demo_page_url, personalisation_hook, current_pain)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-     ON CONFLICT (prospect_email) DO NOTHING`,
-    [
-      contactId,
-      prospectEmail.toLowerCase().trim(),
-      businessName,
-      city,
-      resolveTimezone(city),
-      nicheLabel,
-      businessName,
-      demoUrl,
-      pick('personalisation_hook', 'Personalisation Hook') || '',
-      pick('current_pain', 'Current Pain')                 || '',
-    ]
-  ).catch(e => console.error('[enroll] insert failed:', e.message));
-  console.log(`[enroll] ✅ queued prospectEmail({nicheLabel})`);
-}
 
     // Write straight back to the contact. Not awaited on the critical path:
     // a CRM hiccup should not fail an agent that was created successfully.
