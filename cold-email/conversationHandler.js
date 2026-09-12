@@ -122,6 +122,14 @@ async function sendInThread(enrollment, subject, body) {
   });
 }
 
+function toHtmlEmail(text) {
+  const paragraphs = text
+    .split('\n\n')
+    .map(p => p.replace(/\n/g, '<br>'))
+    .map(p => `<p style="margin:0 0 14px 0;line-height:1.6;">${p}</p>`)
+    .join('');
+  return `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333;max-width:600px;">${paragraphs}</div>`;
+}
 // Post-process AI reply: join lines that break mid-sentence
 function cleanReplyFormatting(text) {
   if (!text) return text;
@@ -164,7 +172,8 @@ async function handleConversationalReply(enrollment, msg) {
   }
   if (!aiResult.reply) { console.error('[conv] empty reply for ' + enrollment.prospect_email); return; }
   const signOff  = `${persona.fullName}\n${persona.title} | Creative Copyz`;
-const cleanReply = cleanReplyFormatting(aiResult.reply) + '\n\n' + signOff;
+const plainText = cleanReplyFormatting(aiResult.reply) + '\n\n' + signOff;
+const cleanReply = toHtmlEmail(plainText);
   let sendResult;
   try {
     sendResult = await sendInThread(enrollment, msg.subject, cleanReply); 
