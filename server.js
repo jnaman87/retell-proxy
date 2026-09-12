@@ -18,6 +18,7 @@ const cors     = require('cors');
 const fetch    = require('node-fetch'); // v2 — CommonJS compatible
 const path     = require('path');
 const fs       = require('fs');
+const { google } = require('googleapis');
 const db       = require('./db');
 const pool = require('./cold-email/pool');
 // ── Cold email ───────────────────────────────────────────────────────────────
@@ -1106,186 +1107,6 @@ if (prospectEmail) {
   }
 });
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /recreate-agent
-// Rebuilds a Retell LLM + Agent from the existing DB record for a slug.
-// The demo URL the contact already received stays unchanged.
-// Accepts: { slug } OR { demoUrl } in the body.
-// ─────────────────────────────────────────────────────────────────────────────
-app.post('/recreate-agent', async (req, res) => {
-  try {
-    const b   = req.body || {};
-    const raw = { ...b, ...(b.customData || {}) };
-
-    // Accept slug directly or extract from a full demo URL
-    let slug = raw.slug || '';
-    const demoUrl = raw.demoUrl || raw['Demo Page URL'] || '';
-    if (!slug && demoUrl) {
-      const m = demoUrl.match(/\/([a-z0-9][a-z0-9-]{2,59})\/?$/i);
-      if (m) slug = m[1];
-    }
-
-    if (!slug) {
-      return res.status(400).json({ error: 'slug or demoUrl is required' });
-    }
-
-    // Look up the existing demo record
-    const existing = await db.getBySlug(slug);
-    if (!existing) {
-      return res.status(404).json({ error: `No demo record found for slug: ${slug}` });
-    }
-
-    const {
-      niche, business_name, city, tagline,
-      core_services, primary_color, secondary_color, contact_id, max_calls,
-    } = existing;
-
-    const RAILWAY_URL = process.env.RAILWAY_PUBLIC_URL;
-    const RETELL_KEY  = process.env.RETELL_API_KEY;
-    const VOICE_ID    = process.env.RETELL_VOICE_ID || 'retell-Cimo';
-
-    // Rebuild system prompt from stored business data
-    const systemPrompt = buildSystemPrompt({
-      niche,
-      businessName : business_name,
-      city,
-      coreServices : core_services,
-      tagline,
-      callerFaqs   : '',  // not stored in DB; will be empty for recreated agents
-    });
-
-    const nicheLabel       = normalizeNiche(niche);
-    const agentDisplayName = `[${nicheLabel}] ${business_name} - ${city}`;
-    const openingLine      = (NICHE_TEMPLATES[nicheLabel] || NICHE_TEMPLATES.restoration)
-      .openingLine.replace('{businessName}', business_name);
-
-    // ── Create new Retell LLM ─────────────────────────────────────────────────
-    const llmRes = await fetch('https://api.retellai.com/create-retell-llm', {
-      method  : 'POST',
-      headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
-      body    : JSON.stringify({
-        model                 : 'gpt-4.1',
-        model_high_priority   : true,
-        model_temperature     : 0,
-        tool_call_strict_mode : true,
-        begin_message         : openingLine,
-        general_prompt        : systemPrompt,
-        general_tools: [
-          {
-    type                         : 'custom',
-    name                         : 'check_availability',
-    description                  : 'Check available appointment slots. Call this whenever the caller wants to book or asks about available times. After calling this tool, speak the result immediately — do not wait for the caller to say anything.',
-    speak_during_execution       : true,
-    speak_after_execution        : true,
-    execution_message_description: 'Tell the caller you are checking available times for them, e.g. "Let me check what times we have available for you."',
-    url                          : `${RAILWAY_URL}/retell-tools/check-availability`,
-    parameters: {
-      type      : 'object',
-      properties: {
-        date    : { type: 'string', description: 'The calendar date to check, formatted as YYYY-MM-DD.' },
-        timezone: { type: 'string', description: 'IANA timezone derived from the location the caller gave you.' },
-      },
-      required: ['date', 'timezone'],
-    },
-  },
-  {
-    type                         : 'custom',
-    name                         : 'book_appointment',
-    description                  : 'Book a confirmed appointment slot. Only call this after the caller has confirmed their first name, last name, email, and chosen time slot.',
-    speak_during_execution       : true,
-    speak_after_execution        : true,
-    execution_message_description: 'Tell the caller you are booking that slot now, e.g. "Perfect, booking that for you now."',
-    url                          : `${RAILWAY_URL}/retell-tools/book-appointment`,
-    parameters: {
-      type      : 'object',
-      properties: {
-        firstName: { type: 'string', description: "Caller's first name, confirmed and spelled back" },
-        lastName : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
-        email    : { type: 'string', description: "Caller's email address, confirmed character by character" },
-        startTime: { type: 'string', description: 'ISO 8601 datetime string of the selected slot' },
-        timezone : { type: 'string', description: 'IANA timezone of the caller' },
-      },
-      required: ['firstName', 'lastName', 'email', 'startTime'],
-    },
-  },
-  {
-    type                         : 'custom',
-    name                         : 'request_followup',
-    description                  : "Call this tool ONLY when check_availability has said there are no openings in the next 2 days, AND you have collected the caller's first name, last name, email and preferred time of day. The team uses these to reach out and arrange a time.",
-    speak_during_execution       : true,
-    speak_after_execution        : true,
-    execution_message_description: 'Tell the caller you are passing their details to the team, e.g. "Perfect, let me get that over to the team now."',
-    url                          : `${RAILWAY_URL}/retell-tools/request-followup`,
-    parameters: {
-      type      : 'object',
-      properties: {
-        firstName    : { type: 'string', description: "Caller's first name, confirmed and spelled back" },
-        lastName     : { type: 'string', description: "Caller's last name, confirmed and spelled back" },
-        email        : { type: 'string', description: "Caller's email address, confirmed character by character" },
-        preferredTime: { type: 'string', description: 'The time of day the caller prefers for a follow-up call, e.g. "mornings", "after 5pm", "weekday afternoons".' },
-        timezone     : { type: 'string', description: 'IANA timezone of the caller, e.g. America/New_York' },
-      },
-      required: ['firstName', 'lastName', 'email', 'preferredTime'],
-    },
-  },
-  {
-    type       : 'end_call',
-    name       : 'end_call',
-    description: 'Hang up the call. Call this immediately after a booking is confirmed, after a follow-up time has been noted, or when the caller says they are not interested. Always say your closing line first, then call this.',
-  },
-        ],
-      }),
-    });
-
-    if (!llmRes.ok) throw new Error(`LLM creation failed: ${await llmRes.text()}`);
-    const llmData = await llmRes.json();
-
-    // ── Create new Retell Agent ──────────────────────────────────────────────
-    const agentRes = await fetch('https://api.retellai.com/create-agent', {
-      method  : 'POST',
-      headers : { 'Authorization': `Bearer ${RETELL_KEY}`, 'Content-Type': 'application/json' },
-      body    : JSON.stringify({
-        response_engine          : { type: 'retell-llm', llm_id: llmData.llm_id },
-        agent_name               : agentDisplayName,
-        voice_id                 : VOICE_ID,
-        language                 : 'en-US',
-        responsiveness           : 0.85,
-        interruption_sensitivity : 1,
-        enable_backchannel       : true,
-        backchannel_frequency    : 0.8,
-        backchannel_words        : ['got it', 'sure', 'okay', 'absolutely'],
-        ambient_sound            : 'coffee-shop',
-        ambient_sound_volume     : 0.1,
-        reminder_trigger_ms      : 10000,
-        reminder_max_count       : 2,
-        webhook_url : `https://retell-proxy-production.up.railway.app/webhook/retell-call-ended`,
-      }),
-    });
-
-    if (!agentRes.ok) throw new Error(`Agent creation failed: ${await agentRes.text()}`);
-    const agentData = await agentRes.json();
-
-    // ── Update DB record in-place (same slug, same demo URL) ──────────────────
-    await db.rebuildDemo(slug, agentData.agent_id, llmData.llm_id);
-
-    const DEMO_BASE = process.env.DEMO_BASE_URL || 'https://demo.creativecopyz.com';
-    console.log(`[recreate-agent] ✅ ${slug} → ${agentData.agent_id}`);
-
-    return res.json({
-      success  : true,
-      slug,
-      agentId  : agentData.agent_id,
-      llmId    : llmData.llm_id,
-      demoUrl  : `DEMOBASE/{slug}`,
-    });
-
-  } catch (error) {
-    console.error('[recreate-agent] error:', error.message);
-    return res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /create-web-call
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2136,6 +1957,20 @@ app.post('/webhook/call-booked', async (req, res) => {
   }
 });
 
+
+app.post('/gmail-webhook', express.json(), async (req, res) => {
+  res.sendStatus(200); // ACK to Pub/Sub immediately — must be fast
+  try {
+    const msg = req.body && req.body.message;
+    if (!msg) return;
+    const decoded = JSON.parse(Buffer.from(msg.data, 'base64').toString());
+    console.log('[webhook] push for', decoded.emailAddress);
+    await detectRepliesAndBounces();
+  } catch (e) {
+    console.error('[webhook] error:', e.message);
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // POST /webhook/retell-call-ended
 // ─────────────────────────────────────────────────────────────────────────
@@ -2441,7 +2276,39 @@ console.log('[cold-email] SA keys found:', saKeys.length ? saKeys.join(', ') : '
 
 if (saKeys.length > 0) {
   setInterval(runSendLoop, 2 * 60 * 1000);
-  setInterval(detectRepliesAndBounces, 20 * 60 * 1000);
+  setInterval(detectRepliesAndBounces, 6 * 60 * 60 * 1000); // fallback every 6h, push handles real-time
+  // Gmail Push: watch all mailboxes so Pub/Sub gets notified on new emails
+const PUBSUB_TOPIC = 'projects/aivoice-gmail-mailer-504813/topics/gmail-push-notifications';
+
+async function watchMailbox(email) {
+  try {
+    const saKey = getServiceAccountKey(email);
+    if (!saKey) return;
+    const auth = new google.auth.JWT(
+      saKey.client_email, null, saKey.private_key,
+      ['https://www.googleapis.com/auth/gmail.readonly'],
+      email
+    );
+    const gmail = google.gmail({ version: 'v1', auth });
+    await gmail.users.watch({
+      userId: 'me',
+      requestBody: { topicName: PUBSUB_TOPIC, labelIds: ['INBOX'] }
+    });
+    console.log(`[watch] ${email} registered`);
+  } catch (e) {
+    console.error(`[watch] ${email} failed:`, e.message);
+  }
+}
+
+async function watchAllMailboxes() {
+  const { rows } = await pool.query('SELECT email FROM mailboxes');
+  for (const { email } of rows) {
+    await watchMailbox(email);
+  }
+}
+
+watchAllMailboxes();
+setInterval(watchAllMailboxes, 24 * 60 * 60 * 1000); // renew daily (watches expire every 7 days)
   runSendLoop();
   detectRepliesAndBounces();
   console.log('[cold-email] Send loop and reply detector started ✅');
