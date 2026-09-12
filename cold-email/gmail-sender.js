@@ -69,7 +69,7 @@ function buildMime({ fromName, fromEmail, to, subject, body, inReplyTo, referenc
     `To: ${to}`,
     `Subject: ${encodeHeader(subject)}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Type: text/html; charset="UTF-8"',
     'Content-Transfer-Encoding: 8bit',
   ];
 
