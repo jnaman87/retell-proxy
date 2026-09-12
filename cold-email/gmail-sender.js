@@ -152,13 +152,14 @@ async function listRecentInbound(mailbox, { days = 3, max = 50 } = {}) {
       const from = get('from').toLowerCase();
 
       out.push({
-        id       : msg.id,
-        threadId : msg.threadId,
-        from,
-        subject  : get('subject'),
-        snippet  : msg.snippet || '',
-        bounced  : /mailer-daemon|postmaster/.test(from),
-      });
+  id           : msg.id,
+  threadId     : msg.threadId,
+  from,
+  subject      : get('subject'),
+  snippet      : msg.snippet || '',
+  bounced      : /mailer-daemon|postmaster/.test(from),
+  internalDate : msg.internalDate ? Number(msg.internalDate) : null,
+});
     } catch (e) {
       console.error(`[gmail] metadata read failed for ${m.id}: ${e.message}`);
     }
