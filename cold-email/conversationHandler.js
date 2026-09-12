@@ -71,7 +71,6 @@ function replySystemPrompt(enrollment, persona) {
     'STRICT RULES:',
     '- NEVER use em dashes in any form',
     '- Salutation must be exactly: Hi ' + firstName + ',',
-    '- Sign-off must be exactly: ' + persona.fullName + '\n' + persona.title + ' | Creative Copyz',
     '- Body: 2 to 4 sentences, no filler phrases',
     '- If the prospect agrees to a call or asks to book, set sendCalLink to true and include this link naturally: ' + CALENDAR_LINK,
     '- Do not repeat the link if they already have it unless they ask',
@@ -98,7 +97,6 @@ function followUpSystemPrompt(enrollment, persona) {
     'STRICT RULES:',
     '- NEVER use em dashes in any form',
     '- Salutation must be exactly: Hi ' + firstName + ',',
-    '- Sign-off must be exactly: ' + persona.fullName + '\n' + persona.title + ' | Creative Copyz',
     '- Body: 2 to 3 sentences maximum',
     '- Include booking link: ' + CALENDAR_LINK,
     '- Always end your reply with an open-ended question -- invite them to confirm the booking, ask if a different time works, or if they have any questions.',
@@ -126,20 +124,25 @@ async function sendInThread(enrollment, subject, body) {
 
 // Post-process AI reply: join lines that break mid-sentence
 function cleanReplyFormatting(text) {
-    if (!text) return text;
-    const lines = text.split('\n');
-    const result = []; let buffer = '';
-    for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) { if (buffer) { result.push(buffer); buffer = ''; } result.push(''); continue; }
-          if (buffer) {
-                  if (/[.?!]$/.test(buffer.trimEnd())) { result.push(buffer); buffer = trimmed; }
-                  else { buffer = buffer.trimEnd() + ' ' + trimmed; }
-                } else { buffer = trimmed; }
+  if (!text) return text;
+  const lines = text.split('\n');
+  const paragraphs = [];
+  let buffer = '';
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (buffer) { paragraphs.push(buffer); buffer = ''; }
+      continue;
     }
-    if (buffer) result.push(buffer);
-    while (result.length && !result[result.length - 1]) result.pop();
-    return result.join('\n');
+    if (buffer) {
+      const isGreeting   = /^(Hi|Hello|Dear)\s+\w/.test(buffer);
+      const endsWithPunct = /[.?!]$/.test(buffer.trimEnd());
+      if (endsWithPunct || isGreeting) { paragraphs.push(buffer); buffer = trimmed; }
+      else { buffer = buffer.trimEnd() + ' ' + trimmed; }
+    } else { buffer = trimmed; }
+  }
+  if (buffer) paragraphs.push(buffer);
+  return paragraphs.join('\n\n');
 }
 // Main: handle an incoming reply conversationally
 async function handleConversationalReply(enrollment, msg) {
@@ -160,7 +163,8 @@ async function handleConversationalReply(enrollment, msg) {
     return;
   }
   if (!aiResult.reply) { console.error('[conv] empty reply for ' + enrollment.prospect_email); return; }
-  const cleanReply = cleanReplyFormatting(aiResult.reply);
+  const signOff  = `${persona.fullName}\n${persona.title} | Creative Copyz`;
+const cleanReply = cleanReplyFormatting(aiResult.reply) + '\n\n' + signOff;
   let sendResult;
   try {
     sendResult = await sendInThread(enrollment, msg.subject, cleanReply); 
@@ -197,7 +201,8 @@ async function sendConvFollowUp(enrollment) {
     return;
   }
   if (!replyText) return;
-  const cleanFollowUp = cleanReplyFormatting(replyText);
+  const signOff     = `${persona.fullName}\n${persona.title} | Creative Copyz`;
+const cleanFollowUp = cleanReplyFormatting(replyText) + '\n\n' + signOff;
   const history     = Array.isArray(enrollment.conversation_history) ? enrollment.conversation_history : [];
   const lastSubject = history.filter(h => h.role === 'prospect').slice(-1)[0]?.content?.split('\n')[0]?.replace('Subject: ', '') || 'our conversation';
   let sendResult;
