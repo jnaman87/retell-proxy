@@ -1,6 +1,7 @@
 'use strict';
 const pool        = require('./pool');
 const { sendEmail } = require('./gmail-sender');
+const { buildDemoForEnrollment } = require('./demoBuilder');
 
 const OPENAI_KEY    = process.env.OPENAI_API_KEY;
 const CALENDAR_LINK = 'https://api.leadconnectorhq.com/widget/bookings/aivoice-onboarding';
@@ -66,23 +67,34 @@ function replySystemPrompt(enrollment, persona) {
     'You are ' + persona.fullName + ', ' + persona.title + ' at Creative Copyz (an AI solutions agency).',
     'Replying to a business owner who received outreach about an AI Voice Receptionist.',
     '',
-    'YOUR SINGLE GOAL: book an AI Voice Receptionist Onboarding Call.',
+    'PRIMARY GOAL DEPENDS ON THE LEAD\'S CURRENT SEQUENCE PHASE:',
+    '- cold: get the prospect to explicitly agree to receive their personalised demo link. Do NOT try to book an onboarding call at this stage.',
+    '- warm: get the prospect to test the personalised demo that has been shared. Do NOT push for an onboarding call unless they have already tested or clearly want to move forward.',
+    '- ultra_warm: help the prospect schedule an AI Voice Receptionist Onboarding Call with Naman.',
+    '- Current phase: ' + (enrollment.phase || 'cold'),
     '',
     'STRICT RULES:',
     '- NEVER use em dashes in any form',
     '- Salutation must be exactly: Hi ' + firstName + ',',
     '- Body: 2 to 4 sentences, no filler phrases',
-    '- If the prospect agrees to a call or asks to book, set sendCalLink to true and include this link naturally: ' + CALENDAR_LINK,
-    '- Do not repeat the link if they already have it unless they ask',
-    '- Always end your reply with an open-ended question -- invite them to book the onboarding call, ask about their current setup, their biggest challenge answering calls, or what they would like to know more about.',
+    '- cold phase: if the prospect asks about pricing, features, setup, or anything else, answer briefly and guide the conversation back toward getting permission to send the personalised demo. Do NOT send the calendar link or ask them to book a call.',
+    '- cold phase: asking a question, showing curiosity, or asking about cost is NOT the same as agreeing to receive the demo. Only explicit agreement such as "yes", "sure", "send it", or equivalent counts as permission.',
+    '- warm phase: focus on getting the prospect to try/test the personalised demo already shared. Do NOT push for an onboarding call merely because they ask questions.',
+    '- ultra_warm phase: if the prospect wants to move forward, talk, book, or asks for next steps, set sendCalLink to true and include this link naturally: ' + CALENDAR_LINK,
+    '- Whenever a call is mentioned, it must be framed as a call with Naman, never as a call with you/the email persona.',
+    '- Do not repeat the calendar link if they already have it unless they ask',
+    '- cold phase: end with an open-ended question that moves toward permission to send the demo.',
+    '- warm phase: end with an open-ended question that encourages them to test the demo or tell you what they think after testing it.',
+    '- ultra_warm phase: end with an open-ended question that moves toward scheduling a call with Naman.',
     '- Never break a sentence across multiple lines. Only start a new paragraph after a full stop, question mark, or exclamation mark. Do not insert a line break mid-sentence.',
     '',
     'CONTEXT:',
     '- Company: ' + (enrollment.company_name || 'their business') + ' (' + (enrollment.niche || '') + ')',
     '- City: ' + (enrollment.prospect_city || ''),
     '- ' + demoLine,
+    '- If the cold-phase prospect explicitly agrees to receive/see the personalised demo, set buildDemo to true. If they only ask a question or show curiosity, set buildDemo to false.',
     '',
-    'Respond ONLY with valid JSON: {"reply": "full email text", "sendCalLink": true or false}',
+    'Respond ONLY with valid JSON: {"reply": "full email text", "buildDemo": true or false, "sendCalLink": true or false}',
   ].join('\n');
      }
 
@@ -91,7 +103,7 @@ function followUpSystemPrompt(enrollment, persona) {
   const firstName = ((enrollment.prospect_name || '').split(' ')[0] || 'there').trim();
   return [
     'You are ' + persona.fullName + ', ' + persona.title + ' at Creative Copyz.',
-    'You sent a booking link for an AI Voice Receptionist Onboarding Call but have not heard back.',
+    'You sent a booking link for an AI Voice Receptionist Onboarding Call with Naman but have not heard back.',
     'Write a brief friendly follow-up nudge. Include the booking link naturally.',
     '',
     'STRICT RULES:',
@@ -99,7 +111,7 @@ function followUpSystemPrompt(enrollment, persona) {
     '- Salutation must be exactly: Hi ' + firstName + ',',
     '- Body: 2 to 3 sentences maximum',
     '- Include booking link: ' + CALENDAR_LINK,
-    '- Always end your reply with an open-ended question -- invite them to confirm the booking, ask if a different time works, or if they have any questions.',
+    '- Always frame the booking as a call with Naman. End with an open-ended question inviting them to confirm the call with Naman, ask if a different time works, or if they have any questions.',
     '- Never break a sentence across multiple lines. Only start a new paragraph after a full stop, question mark, or exclamation mark.',
     '',
     'Respond ONLY with valid JSON: {"reply": "full email text"}',
@@ -166,35 +178,72 @@ async function handleConversationalReply(enrollment, msg) {
     const system   = replySystemPrompt({ ...enrollment, conversation_history: withIncoming }, persona);
     const messages = buildMessages({ ...enrollment, conversation_history: withIncoming }, system, 'Subject: ' + msg.subject + '\n\n' + msg.snippet);
     const parsed   = await callOpenAI(messages);
-    aiResult = { reply: parsed.reply || null, sendCalLink: Boolean(parsed.sendCalLink) };
+    aiResult = { reply: parsed.reply || null, buildDemo: Boolean(parsed.buildDemo), sendCalLink: Boolean(parsed.sendCalLink) };
   } catch (e) {
     console.error('[conv] OpenAI error for ' + enrollment.prospect_email + ':', e.message);
     return;
   }
   if (!aiResult.reply) { console.error('[conv] empty reply for ' + enrollment.prospect_email); return; }
-  const rawReply  = (aiResult.reply || '').replace(/^((Hi|Hello|Dear)\s+\w+[,!]?)\s+/m, '$1\n\n');
-const signOff   = `${persona.fullName}\n${persona.title} | Creative Copyz`;
-const cleanReply = toHtmlEmail(cleanReplyFormatting(rawReply) + '\n\n' + signOff);
+
+  // Build only after the AI explicitly determines that a cold lead agreed to receive the demo.
+  // Pricing, feature, setup, or other information questions must never trigger a build.
+  let demoUrl = enrollment.demo_page_url || null;
+  if (enrollment.phase === 'cold' && aiResult.buildDemo) {
+    demoUrl = await buildDemoForEnrollment(enrollment);
+    if (!demoUrl) {
+      console.error('[conv] demo build failed for ' + enrollment.prospect_email + '; sending reply without demo link');
+      aiResult.buildDemo = false;
+    } else {
+      // Persist immediately so a transient Gmail send failure does not cause a second
+      // Retell agent/demo to be created on the next inbound reply.
+      await pool.query(
+        'UPDATE enrollments SET demo_page_url = $1 WHERE id = $2',
+        [demoUrl, enrollment.id]
+      );
+    }
+  }
+
+  let replyText = aiResult.reply;
+  if (enrollment.phase === 'cold' && aiResult.buildDemo && demoUrl) {
+    replyText += `\n\nHere is your personalised demo: ${demoUrl}`;
+  }
+
+  const rawReply = replyText.replace(/^((Hi|Hello|Dear)\s+\w+[,!]?)\s+/m, '$1\n\n');
+  const signOff = `${persona.fullName}\n${persona.title} | Creative Copyz`;
+  const cleanReply = toHtmlEmail(cleanReplyFormatting(rawReply) + '\n\n' + signOff);
+
   let sendResult;
   try {
-    sendResult = await sendInThread(enrollment, msg.subject, cleanReply); 
+    sendResult = await sendInThread(enrollment, msg.subject, cleanReply);
   } catch (e) {
     console.error('[conv] send failed for ' + enrollment.prospect_email + ':', e.message);
     return;
   }
+
   const finalHistory = [
     ...withIncoming,
-  { role: 'assistant', content: cleanReply, timestamp: new Date().toISOString(), phase: enrollment.phase },  ];
+    { role: 'assistant', content: cleanReply, timestamp: new Date().toISOString(), phase: enrollment.phase },
+  ];
   const newConvStatus = aiResult.sendCalLink ? 'calendar_sent' : 'active';
+
+  // Sending the demo is the cold -> warm transition. Delay the first warm-sequence
+  // email so it does not arrive immediately on top of the demo email.
+  const demoWasSent = enrollment.phase === 'cold' && aiResult.buildDemo && Boolean(demoUrl);
+  const nextPhase = demoWasSent ? 'warm' : enrollment.phase;
+  const nextStatus = demoWasSent ? 'active' : 'replied';
+
   await pool.query(
-    'UPDATE enrollments SET status = $1, conversation_history = $2::jsonb, conv_status = $3,' +
-    ' calendar_sent_at = CASE WHEN $4 THEN NOW() ELSE calendar_sent_at END,' +
-    ' last_message_id = $5, last_conv_at = NOW(),' +
-    ' conv_followup_at = CASE WHEN $4 THEN NOW() + INTERVAL \'' + FOLLOWUP_DAYS + ' days\' ELSE conv_followup_at END' +
-    ' WHERE id = $6',
-    ['replied', JSON.stringify(finalHistory), newConvStatus, aiResult.sendCalLink, sendResult.messageId, enrollment.id]
+    'UPDATE enrollments SET status = $1, phase = $2, step = CASE WHEN $3 THEN 0 ELSE step END,' +
+    ' demo_page_url = CASE WHEN $3 THEN $4 ELSE demo_page_url END,' +
+    ' next_send_at = CASE WHEN $3 THEN NOW() + INTERVAL \'2 days\' ELSE next_send_at END,' +
+    ' conversation_history = $5::jsonb, conv_status = $6,' +
+    ' calendar_sent_at = CASE WHEN $7 THEN NOW() ELSE calendar_sent_at END,' +
+    ' last_message_id = $8, last_conv_at = NOW(),' +
+    ` conv_followup_at = CASE WHEN $7 THEN NOW() + INTERVAL '${FOLLOWUP_DAYS} days' ELSE conv_followup_at END` +
+    ' WHERE id = $9',
+    [nextStatus, nextPhase, demoWasSent, demoUrl, JSON.stringify(finalHistory), newConvStatus, aiResult.sendCalLink, sendResult.messageId, enrollment.id]
   );
-  console.log('[conv] ' + enrollment.prospect_email + ' -> replied (' + newConvStatus + ')');
+  console.log('[conv] ' + enrollment.prospect_email + ' -> replied (' + newConvStatus + ')' + (demoWasSent ? ' -> warm, demo sent' : ''));
 }
 
 // Periodic: send follow-up when no reply after calendar link sent
