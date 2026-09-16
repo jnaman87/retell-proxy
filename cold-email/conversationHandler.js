@@ -113,7 +113,7 @@ function replySystemPrompt(enrollment, persona) {
     '- Company: ' + (enrollment.company_name || 'their business') + ' (' + (enrollment.niche || '') + ')',
     '- City: ' + (enrollment.prospect_city || ''),
     '- ' + demoLine,
-    '- If the cold-phase prospect explicitly agrees to receive/see the personalised demo, set buildDemo to true. If they only ask a question or show curiosity, set buildDemo to false.',
+    '- If the cold-phase prospect explicitly agrees to receive/see the personalised demo, set buildDemo to true. If they only ask a question or show curiosity, set buildDemo to false. Once buildDemo is true, write a very short confirmation only; do not say you will build, prepare, get ready, or send later because the demo is already live and the system will insert the live link immediately.',
     '',
     'Respond ONLY with valid JSON: {"reply": "full email text", "buildDemo": true or false, "sendCalLink": true or false}',
   ].join('\n');
@@ -194,8 +194,8 @@ function hasPricingOrInfoQuestion(text) {
 function hasExplicitDemoPermission(text) {
   const t = String(text || '').toLowerCase();
   return (
-    /\\b(send|share|receive|get|show|see|view|try|test|check out|check it out|look at|have)\\b.{0,60}\\b(demo|demonstration|personalised demo|personalized demo|ai voice receptionist)\\b/.test(t) ||
-    /\\b(demo|demonstration|personalised demo|personalized demo)\\b.{0,60}\\b(send|share|receive|get|show|see|view|try|test|want|would like|love to)\\b/.test(t)
+    /\b(send|share|receive|get|show|see|view|try|test|check out|check it out|look at|have)\b.{0,60}\b(demo|demonstration|personalised demo|personalized demo|ai voice receptionist)\b/.test(t) ||
+    /\b(demo|demonstration|personalised demo|personalized demo)\b.{0,60}\b(send|share|receive|get|show|see|view|try|test|want|would like|love to)\b/.test(t)
   );
 }
 
@@ -264,11 +264,15 @@ async function handleConversationalReply(enrollment, msg) {
   }
 
   let replyText = aiResult.reply;
-  if (enrollment.phase === 'cold' && aiResult.buildDemo && demoUrl) {
-    replyText += `\n\nHere is your personalised demo: ${demoUrl}`;
+  const demoWasSent = enrollment.phase === 'cold' && aiResult.buildDemo && Boolean(demoUrl);
+
+  // Once a cold lead explicitly agrees to see the demo, the demo is already live.
+  // Do not let the LLM say it will build/prepare/get the demo ready. The system
+  // owns this response and must immediately share the live link and ask them to test it.
+  if (demoWasSent) {
+    replyText = `Hi ${((enrollment.prospect_name || '').split(' ')[0] || 'there').trim()},\n\nGreat! Here is your personalised demo: ${demoUrl}\n\nPlease give it a quick test and let me know what you think.`;
   }
 
-  const demoWasSent = enrollment.phase === 'cold' && aiResult.buildDemo && Boolean(demoUrl);
   const rawReply = replyText.replace(/^((Hi|Hello|Dear)\s+\w+[,!]?)\s+/m, '$1\n\n');
   const signOff = `${persona.fullName}\n${persona.title} | Creative Copyz`;
   const cleanReply = toHtmlEmail(cleanReplyFormatting(rawReply) + '\n\n' + signOff);
