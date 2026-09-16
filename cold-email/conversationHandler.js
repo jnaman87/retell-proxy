@@ -78,7 +78,7 @@ function replySystemPrompt(enrollment, persona) {
     '- Salutation must be exactly: Hi ' + firstName + ',',
     '- Body: 2 to 4 sentences, no filler phrases',
     '- cold phase: if the prospect asks about pricing, features, setup, or anything else, answer briefly and guide the conversation back toward getting permission to send the personalised demo. Do NOT send the calendar link or ask them to book a call.',
-    '- cold phase: asking a question, showing curiosity, or asking about cost is NOT the same as agreeing to receive the demo. Only explicit agreement such as "yes", "sure", "send it", or equivalent counts as permission.',
+    '- cold phase: generic affirmations such as "yes", "sure", "okay", "sounds good", or "absolutely" are NOT enough by themselves to authorize a demo build when the message also asks about pricing, cost, features, setup, or other information. In those cases, buildDemo must be false unless the prospect explicitly says they want to receive, see, try, test, or have the demo.',
     '- warm phase: focus on getting the prospect to try/test the personalised demo already shared. Do NOT push for an onboarding call merely because they ask questions.',
     '- ultra_warm phase: if the prospect wants to move forward, talk, book, or asks for next steps, set sendCalLink to true and include this link naturally: ' + CALENDAR_LINK,
     '- Whenever a call is mentioned, it must be framed as a call with Naman, never as a call with you/the email persona.',
@@ -92,7 +92,7 @@ function replySystemPrompt(enrollment, persona) {
     '- Company: ' + (enrollment.company_name || 'their business') + ' (' + (enrollment.niche || '') + ')',
     '- City: ' + (enrollment.prospect_city || ''),
     '- ' + demoLine,
-    '- If the cold-phase prospect explicitly agrees to receive/see the personalised demo, set buildDemo to true. If they only ask a question or show curiosity, set buildDemo to false.',
+    '- If the cold-phase prospect explicitly asks to receive, see, try, test, or have the personalised demo, set buildDemo to true. A generic "yes", "sure", "okay", or "sounds good" is not sufficient when paired with a pricing/info question. If there is any ambiguity, set buildDemo to false.',
     '',
     'Respond ONLY with valid JSON: {"reply": "full email text", "buildDemo": true or false, "sendCalLink": true or false}',
   ].join('\n');
@@ -165,6 +165,24 @@ function toHtmlEmail(text) {
   return `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333;max-width:600px;">${paragraphs}</div>`;
 }
 
+// Deterministic guardrails for demo permission.
+function hasPricingOrInfoQuestion(text) {
+  const t = String(text || '').toLowerCase();
+  return /\b(how much|what does.*cost|what.*price|price|pricing|cost|costs|fee|fees|rate|rates|monthly|per month|setup fee|charge|charges)\b/.test(t);
+}
+
+function hasExplicitDemoPermission(text) {
+  const t = String(text || '').toLowerCase();
+  return /\b(send|share|receive|get|show|see|view|try|test|check out|check it out|look at|have)\b.{0,50}\b(demo|demonstration|personalised demo|personalized demo|ai voice receptionist)\b/.test(t)
+    || /\b(demo|demonstration|personalised demo|personalized demo)\b.{0,50}\b(send|share|receive|get|show|see|view|try|test|want|would like|love to)\b/.test(t);
+}
+
+function shouldBuildDemoForColdReply(text, aiDecision) {
+  if (!aiDecision) return false;
+  if (hasPricingOrInfoQuestion(text) && !hasExplicitDemoPermission(text)) return false;
+  return true;
+}
+
 // Main: handle an incoming reply conversationally
 async function handleConversationalReply(enrollment, msg) {
   const persona  = getPersona(enrollment.mailbox);
@@ -178,7 +196,22 @@ async function handleConversationalReply(enrollment, msg) {
     const system   = replySystemPrompt({ ...enrollment, conversation_history: withIncoming }, persona);
     const messages = buildMessages({ ...enrollment, conversation_history: withIncoming }, system, 'Subject: ' + msg.subject + '\n\n' + msg.snippet);
     const parsed   = await callOpenAI(messages);
-    aiResult = { reply: parsed.reply || null, buildDemo: Boolean(parsed.buildDemo), sendCalLink: Boolean(parsed.sendCalLink) };
+    const rawIncoming = 'Subject: ' + msg.subject + '\n' + msg.snippet;
+    const llmBuildDemo = Boolean(parsed.buildDemo);
+    const guardedBuildDemo =
+      enrollment.phase === 'cold'
+        ? shouldBuildDemoForColdReply(rawIncoming, llmBuildDemo)
+        : false;
+
+    if (enrollment.phase === 'cold' && llmBuildDemo && !guardedBuildDemo) {
+      console.log('[conv] demo build blocked by deterministic cold-reply guard for ' + enrollment.prospect_email);
+    }
+
+    aiResult = {
+      reply: parsed.reply || null,
+      buildDemo: guardedBuildDemo,
+      sendCalLink: Boolean(parsed.sendCalLink)
+    };
   } catch (e) {
     console.error('[conv] OpenAI error for ' + enrollment.prospect_email + ':', e.message);
     return;
