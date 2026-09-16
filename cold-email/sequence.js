@@ -653,8 +653,8 @@ const ultra_warm = [
     delayDays: 2,
     body: (e, p) => `<p>curious what you thought.</p>
 <p>you gave Emma a call. most people are surprised how naturally she handles everything, from fielding questions after-hours to booking jobs on the spot. anything stand out?</p>
-<p>if you're open to it, I'd love to get on a quick 15-min call and walk you through what this looks like inside ${e.company_name}'s operation.</p>
-<p>just reply here and we'll find a time.</p>
+<p>if you're open to it, Naman can walk you through what this looks like inside ${e.company_name}'s operation on a quick 15-min call.</p>
+<p>if you'd like to schedule a call with Naman, just reply here and we'll find a time.</p>
 <p>Best Regards,<br>
 ${p.full_name}<br>
 Head of Business Development | Creative Copyz</p>`,
@@ -667,7 +667,7 @@ Head of Business Development | Creative Copyz</p>`,
 <p>a couple of things that usually come up:</p>
 <p>"does it actually sound human?" Emma was built for this. she handles the back-and-forth naturally, knows when to escalate, and doesn't drop calls.</p>
 <p>"what if it can't answer something?" she captures the lead and flags it. nothing slips through.</p>
-<p>if you're ready to see how this fits ${e.company_name}, just reply and we'll make it happen.</p>
+<p>if you're ready to see how this fits ${e.company_name}, reply here and we'll help you schedule a call with Naman.</p>
 <p>Best Regards,<br>
 ${p.full_name}<br>
 Head of Business Development | Creative Copyz</p>`,
@@ -675,7 +675,7 @@ Head of Business Development | Creative Copyz</p>`,
   {
     subject: () => `last one from me`,
     body: (e, p) => `<p>closing the loop on ${e.company_name}.</p>
-<p>if AI voice is something you'd want to move forward with, you can grab a time here:</p>
+<p>if AI voice is something you'd want to move forward with, you can schedule a call with Naman here:</p>
 <p><a href="${process.env.WARM_BOOKING_LINK || ''}">${process.env.WARM_BOOKING_LINK || ''}</a></p>
 <p>if the timing's not right, no worries at all. appreciate you taking the time to try Emma.</p>
 <p>Best Regards,<br>
