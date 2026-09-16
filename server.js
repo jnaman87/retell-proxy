@@ -2035,12 +2035,15 @@ if (!enrollment) {
   return;
 }
 
+    // A demo is sent from the cold conversation flow, which moves the enrollment
+    // to warm. Only a substantive call while warm counts as the demo being tested
+    // and advances the lead to ultra_warm. Never let a cold/other call create a
+    // false phase transition.
     if (enrollment.phase === 'warm') {
-      console.log(`[retell-webhook] phase=warm → transitionToUltraWarm`);
+      console.log(`[retell-webhook] phase=warm → demo tested → transitionToUltraWarm`);
       await transitionToUltraWarm(demo.contact_id);
     } else {
-      console.log(`[retell-webhook] phase=${enrollment.phase} → transitionToWarm`);
-      await transitionToWarm(demo.contact_id);
+      console.log(`[retell-webhook] phase=${enrollment.phase} → no phase transition`);
     }
 
   } catch (err) {
