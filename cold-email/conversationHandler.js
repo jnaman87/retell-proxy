@@ -4,29 +4,8 @@ const { sendEmail } = require('./gmail-sender');
 const { buildDemoForEnrollment } = require('./demoBuilder');
 
 const OPENAI_KEY    = process.env.OPENAI_API_KEY;
-const CRM_API       = 'https://services.leadconnectorhq.com';
-const CRM_API_KEY   = process.env.CRM_API_KEY;
 const CALENDAR_LINK = 'https://api.leadconnectorhq.com/widget/bookings/aivoice-onboarding';
 const FOLLOWUP_DAYS = 2;
-
-async function tagContact(contactId, tag) {
-  if (!contactId) {
-    console.error('[conv] cannot apply GHL tag without contactId:', tag);
-    return;
-  }
-  await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${CRM_API_KEY}`,
-      Version: '2021-04-15',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ tags: [tag] }),
-  }).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    console.log(`[conv] GHL tag ${tag} → HTTP ${r.status}`);
-  }).catch(e => console.error(`[conv] GHL tag ${tag} failed:`, e.message));
-}
 
 // Mailbox personas
 const MAILBOX_PERSONAS = {
@@ -186,46 +165,6 @@ function toHtmlEmail(text) {
   return `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333;max-width:600px;">${paragraphs}</div>`;
 }
 
-function hasPricingOrInfoQuestion(text) {
-  const t = String(text || '').toLowerCase();
-  return /\b(how much|what(?:'s| is| does)?\s+(?:the\s+)?(?:cost|price|pricing)|what does.*cost|price|pricing|cost|costs|fee|fees|rate|rates|monthly|per month|setup fee|charge|charges)\b/.test(t);
-}
-
-function hasExplicitDemoPermission(text) {
-  const t = String(text || '').toLowerCase();
-  return (
-    /\b(send|share|receive|get|show|see|view|try|test|check out|check it out|look at|have)\b.{0,60}\b(demo|demonstration|personalised demo|personalized demo|ai voice receptionist)\b/.test(t) ||
-    /\b(demo|demonstration|personalised demo|personalized demo)\b.{0,60}\b(send|share|receive|get|show|see|view|try|test|want|would like|love to)\b/.test(t)
-  );
-}
-
-function hasDemoOfferInHistory(history) {
-  const recent = Array.isArray(history) ? history.slice(-6) : [];
-  return recent.some(h => {
-    if (h.role !== 'assistant') return false;
-    const t = String(h.content || '').toLowerCase();
-    return /\b(would you like|do you want|want me to|shall i|can i|should i)\b.{0,100}\b(send|share|receive|see|view|try|test)\b.{0,40}\b(demo|demonstration|ai voice receptionist)\b/.test(t)
-      || /\b(send|share|receive|see|view|try|test)\b.{0,40}\b(demo|demonstration|personalised demo|personalized demo)\b/.test(t);
-  });
-}
-
-function hasGenericAffirmation(text) {
-  const t = String(text || '').toLowerCase().trim();
-  return /^(yes|yeah|yep|sure|okay|ok|absolutely|definitely|sounds good|that sounds good|please do|go ahead|i'd like that|id like that|yes please)[.!\s]*$/.test(t);
-}
-
-function shouldBuildDemoForColdReply(text, aiDecision, history) {
-  if (!aiDecision) return false;
-  const explicitDemo = hasExplicitDemoPermission(text);
-  // A pricing/info question wins unless the prospect explicitly mentions the demo
-  // in that same reply. This prevents "Sure. What's the cost?" from building a demo.
-  if (hasPricingOrInfoQuestion(text) && !explicitDemo) return false;
-  if (explicitDemo) return true;
-  // If the immediately preceding conversation explicitly offered the demo, a short
-  // affirmative such as "Sure" or "Yes" is valid permission to receive it.
-  return hasGenericAffirmation(text) && hasDemoOfferInHistory(history);
-}
-
 // Main: handle an incoming reply conversationally
 async function handleConversationalReply(enrollment, msg) {
   const persona  = getPersona(enrollment.mailbox);
@@ -239,32 +178,12 @@ async function handleConversationalReply(enrollment, msg) {
     const system   = replySystemPrompt({ ...enrollment, conversation_history: withIncoming }, persona);
     const messages = buildMessages({ ...enrollment, conversation_history: withIncoming }, system, 'Subject: ' + msg.subject + '\n\n' + msg.snippet);
     const parsed   = await callOpenAI(messages);
-    const rawIncoming = 'Subject: ' + (msg.subject || '') + '\n' + (msg.snippet || '');
-    const llmBuildDemo = Boolean(parsed.buildDemo);
-    const guardedBuildDemo =
-      enrollment.phase === 'cold'
-        ? shouldBuildDemoForColdReply(rawIncoming, llmBuildDemo, withIncoming)
-        : false;
-
-    if (enrollment.phase === 'cold' && llmBuildDemo && !guardedBuildDemo) {
-      console.log('[conv] demo build blocked by deterministic cold-reply guard for ' + enrollment.prospect_email);
-    }
-
-    aiResult = {
-      reply: parsed.reply || null,
-      buildDemo: guardedBuildDemo,
-      sendCalLink: Boolean(parsed.sendCalLink)
-    };
+    aiResult = { reply: parsed.reply || null, buildDemo: Boolean(parsed.buildDemo), sendCalLink: Boolean(parsed.sendCalLink) };
   } catch (e) {
     console.error('[conv] OpenAI error for ' + enrollment.prospect_email + ':', e.message);
     return;
   }
   if (!aiResult.reply) { console.error('[conv] empty reply for ' + enrollment.prospect_email); return; }
-
-  // Any reply that reaches the conversational handler is non-negative.
-  // Negative/unsubscribe replies are handled separately by replyDetector and receive
-  // only the aivoice_reply_negative tag there.
-  await tagContact(enrollment.contact_id, 'aivoice_reply_received');
 
   // Build only after the AI explicitly determines that a cold lead agreed to receive the demo.
   // Pricing, feature, setup, or other information questions must never trigger a build.
@@ -284,20 +203,16 @@ async function handleConversationalReply(enrollment, msg) {
     }
   }
 
-  const demoWasSent = enrollment.phase === 'cold' && aiResult.buildDemo && Boolean(demoUrl);
-
-  // A demo agreement is an action, not a normal conversational reply. The demo is
-  // already live by the time this branch runs, so never let the LLM invent a
-  // placeholder such as [Personalised Demo Link] or say it will prepare it later.
-  // The actual URL returned by /create-agent is inserted deterministically here.
   let replyText = aiResult.reply;
-  if (demoWasSent) {
-    const firstName = ((enrollment.prospect_name || '').split(' ')[0] || 'there').trim();
-    replyText = `Hi ${firstName},\n\nGreat! Here is your personalised demo: ${demoUrl}\n\nPlease give it a quick test and let me know what you think.`;
+  if (enrollment.phase === 'cold' && aiResult.buildDemo && demoUrl) {
+    replyText += `\n\nHere is your personalised demo: ${demoUrl}`;
   }
+
   const rawReply = replyText.replace(/^((Hi|Hello|Dear)\s+\w+[,!]?)\s+/m, '$1\n\n');
   const signOff = `${persona.fullName}\n${persona.title} | Creative Copyz`;
   const cleanReply = toHtmlEmail(cleanReplyFormatting(rawReply) + '\n\n' + signOff);
+
+  const demoWasSent = enrollment.phase === 'cold' && aiResult.buildDemo && Boolean(demoUrl);
 
   let sendResult;
   try {
