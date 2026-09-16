@@ -113,7 +113,7 @@ function replySystemPrompt(enrollment, persona) {
     '- Company: ' + (enrollment.company_name || 'their business') + ' (' + (enrollment.niche || '') + ')',
     '- City: ' + (enrollment.prospect_city || ''),
     '- ' + demoLine,
-    '- If the cold-phase prospect explicitly agrees to receive/see the personalised demo, set buildDemo to true. If they only ask a question or show curiosity, set buildDemo to false. Once buildDemo is true, write a very short confirmation only; do not say you will build, prepare, get ready, or send later because the demo is already live and the system will insert the live link immediately.',
+    '- If the cold-phase prospect explicitly agrees to receive/see the personalised demo, set buildDemo to true. If they only ask a question or show curiosity, set buildDemo to false.',
     '',
     'Respond ONLY with valid JSON: {"reply": "full email text", "buildDemo": true or false, "sendCalLink": true or false}',
   ].join('\n');
@@ -188,7 +188,7 @@ function toHtmlEmail(text) {
 
 function hasPricingOrInfoQuestion(text) {
   const t = String(text || '').toLowerCase();
-  return /\\b(how much|what(?:'s| is| does)?\\s+(?:the\\s+)?(?:cost|price|pricing)|what does.*cost|price|pricing|cost|costs|fee|fees|rate|rates|monthly|per month|setup fee|charge|charges)\\b/.test(t);
+  return /\b(how much|what(?:'s| is| does)?\s+(?:the\s+)?(?:cost|price|pricing)|what does.*cost|price|pricing|cost|costs|fee|fees|rate|rates|monthly|per month|setup fee|charge|charges)\b/.test(t);
 }
 
 function hasExplicitDemoPermission(text) {
@@ -199,10 +199,31 @@ function hasExplicitDemoPermission(text) {
   );
 }
 
-function shouldBuildDemoForColdReply(text, aiDecision) {
+function hasDemoOfferInHistory(history) {
+  const recent = Array.isArray(history) ? history.slice(-6) : [];
+  return recent.some(h => {
+    if (h.role !== 'assistant') return false;
+    const t = String(h.content || '').toLowerCase();
+    return /\b(would you like|do you want|want me to|shall i|can i|should i)\b.{0,100}\b(send|share|receive|see|view|try|test)\b.{0,40}\b(demo|demonstration|ai voice receptionist)\b/.test(t)
+      || /\b(send|share|receive|see|view|try|test)\b.{0,40}\b(demo|demonstration|personalised demo|personalized demo)\b/.test(t);
+  });
+}
+
+function hasGenericAffirmation(text) {
+  const t = String(text || '').toLowerCase().trim();
+  return /^(yes|yeah|yep|sure|okay|ok|absolutely|definitely|sounds good|that sounds good|please do|go ahead|i'd like that|id like that|yes please)[.!\s]*$/.test(t);
+}
+
+function shouldBuildDemoForColdReply(text, aiDecision, history) {
   if (!aiDecision) return false;
-  if (hasPricingOrInfoQuestion(text) && !hasExplicitDemoPermission(text)) return false;
-  return hasExplicitDemoPermission(text);
+  const explicitDemo = hasExplicitDemoPermission(text);
+  // A pricing/info question wins unless the prospect explicitly mentions the demo
+  // in that same reply. This prevents "Sure. What's the cost?" from building a demo.
+  if (hasPricingOrInfoQuestion(text) && !explicitDemo) return false;
+  if (explicitDemo) return true;
+  // If the immediately preceding conversation explicitly offered the demo, a short
+  // affirmative such as "Sure" or "Yes" is valid permission to receive it.
+  return hasGenericAffirmation(text) && hasDemoOfferInHistory(history);
 }
 
 // Main: handle an incoming reply conversationally
@@ -222,7 +243,7 @@ async function handleConversationalReply(enrollment, msg) {
     const llmBuildDemo = Boolean(parsed.buildDemo);
     const guardedBuildDemo =
       enrollment.phase === 'cold'
-        ? shouldBuildDemoForColdReply(rawIncoming, llmBuildDemo)
+        ? shouldBuildDemoForColdReply(rawIncoming, llmBuildDemo, withIncoming)
         : false;
 
     if (enrollment.phase === 'cold' && llmBuildDemo && !guardedBuildDemo) {
@@ -263,16 +284,17 @@ async function handleConversationalReply(enrollment, msg) {
     }
   }
 
-  let replyText = aiResult.reply;
   const demoWasSent = enrollment.phase === 'cold' && aiResult.buildDemo && Boolean(demoUrl);
 
-  // Once a cold lead explicitly agrees to see the demo, the demo is already live.
-  // Do not let the LLM say it will build/prepare/get the demo ready. The system
-  // owns this response and must immediately share the live link and ask them to test it.
+  // A demo agreement is an action, not a normal conversational reply. The demo is
+  // already live by the time this branch runs, so never let the LLM invent a
+  // placeholder such as [Personalised Demo Link] or say it will prepare it later.
+  // The actual URL returned by /create-agent is inserted deterministically here.
+  let replyText = aiResult.reply;
   if (demoWasSent) {
-    replyText = `Hi ${((enrollment.prospect_name || '').split(' ')[0] || 'there').trim()},\n\nGreat! Here is your personalised demo: ${demoUrl}\n\nPlease give it a quick test and let me know what you think.`;
+    const firstName = ((enrollment.prospect_name || '').split(' ')[0] || 'there').trim();
+    replyText = `Hi ${firstName},\n\nGreat! Here is your personalised demo: ${demoUrl}\n\nPlease give it a quick test and let me know what you think.`;
   }
-
   const rawReply = replyText.replace(/^((Hi|Hello|Dear)\s+\w+[,!]?)\s+/m, '$1\n\n');
   const signOff = `${persona.fullName}\n${persona.title} | Creative Copyz`;
   const cleanReply = toHtmlEmail(cleanReplyFormatting(rawReply) + '\n\n' + signOff);
