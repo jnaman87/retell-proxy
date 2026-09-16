@@ -117,7 +117,11 @@ async function classifyReply(subject, snippet) {
     const text = `${subject} ${snippet}`.toLowerCase();
     if (/\b(unsubscribe|remove me|opt out|stop emails|take me off)\b/.test(text)) return 'unsubscribe';
     if (/\b(no thanks|not interested|no thank you|stop|don't contact|leave me alone|not for us)\b/.test(text)) return 'negative';
-    if (/\b(yes|interested|sounds good|call me|send it|book|schedule|want to see)\b/.test(text)) return 'positive';
+    const asksPricing = /\b(how much|what does.*cost|what.*price|price|pricing|cost|costs|fee|fees|rate|rates|monthly|per month|setup fee|charge|charges)\b/.test(text);
+    const explicitDemo = /\b(send|share|receive|get|show|see|view|try|test|check out|check it out|look at|have)\b.{0,50}\b(demo|demonstration|personalised demo|personalized demo|ai voice receptionist)\b/.test(text)
+      || /\b(demo|demonstration|personalised demo|personalized demo)\b.{0,50}\b(send|share|receive|get|show|see|view|try|test|want|would like|love to)\b/.test(text);
+    if (asksPricing && !explicitDemo) return 'neutral';
+    if (/\b(interested|sounds good|call me|send it|book|schedule|want to see)\b/.test(text)) return 'positive';
     return 'neutral';
   }
   try {
