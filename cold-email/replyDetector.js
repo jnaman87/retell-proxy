@@ -117,7 +117,7 @@ async function classifyReply(subject, snippet) {
     const text = `${subject} ${snippet}`.toLowerCase();
     if (/\b(unsubscribe|remove me|opt out|stop emails|take me off)\b/.test(text)) return 'unsubscribe';
     if (/\b(no thanks|not interested|no thank you|stop|don't contact|leave me alone|not for us)\b/.test(text)) return 'negative';
-    if (/\b(yes|interested|sounds good|let's talk|call me|send it|tell me more|book|schedule|want to see)\b/.test(text)) return 'positive';
+    if (/\b(yes|interested|sounds good|call me|send it|book|schedule|want to see)\b/.test(text)) return 'positive';
     return 'neutral';
   }
   try {
@@ -127,7 +127,13 @@ async function classifyReply(subject, snippet) {
       body: JSON.stringify({
         model: 'gpt-4o-mini', temperature: 0, response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: 'Classify the intent of a reply to a cold outreach email about an AI voice receptionist.\nRespond ONLY with JSON: {"intent": "positive"|"negative"|"neutral"|"unsubscribe"}\n- positive: interested, wants demo, wants a call, asks for info\n- negative: not interested, no thanks, stop contacting\n- unsubscribe: explicitly asks to unsubscribe / stop emails\n- neutral: anything else' },
+          { role: 'system', content: `Classify the intent of a reply to a cold outreach email about an AI voice receptionist.
+Respond ONLY with JSON: {"intent": "positive"|"negative"|"neutral"|"unsubscribe"}
+- positive: explicit interest, explicit request for the demo, or explicit request to move forward/book a call
+- negative: not interested, no thanks, stop contacting
+- unsubscribe: explicitly asks to unsubscribe / stop emails
+- neutral: questions or information requests that do not explicitly express interest or permission to proceed, including pricing questions such as "How much would it cost?"
+Important: asking about cost, features, setup, or how it works is NOT by itself an agreement to receive a demo.` },,
           { role: 'user', content: `Subject: ${subject}\n\nReply: ${snippet}` },
         ],
       }),
@@ -142,32 +148,7 @@ async function classifyReply(subject, snippet) {
   }
 }
 
-// Demo build trigger
-async function buildDemoForEnrollment(enrollment) {
-  const PORT = process.env.PORT || 3000;
-  const base = `http://localhost:${PORT}`;
-  try {
-    const r = await fetch(`${base}/create-agent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        niche: enrollment.niche, businessName: enrollment.company_name,
-        city: enrollment.prospect_city, coreServices: enrollment.core_services || '',
-        tagline: enrollment.tagline || '', primaryColor: enrollment.primary_color || '',
-        secondaryColor: enrollment.secondary_color || '', callerFaqs: enrollment.caller_faqs || '',
-        contactId: enrollment.contact_id, email: enrollment.prospect_email,
-      }),
-    });
-    const d = await r.json();
-    if (!r.ok || !d.demoUrl) { console.error('[detect] demo build failed:', JSON.stringify(d)); return null; }
-    return d.demoUrl;
-  } catch (e) {
-    console.error('[detect] demo build error:', e.message);
-    return null;
-  }
-}
-
-// Handle positive cold reply (build demo, start warm sequence)
+// Handle positive cold reply (record interest, then let conversational AI obtain explicit demo permission)
 async function handlePositive(enrollment, msg) {
   const { contact_id, prospect_email } = enrollment;
   if (enrollment.positive_reply_at) {
@@ -195,7 +176,7 @@ async function handlePositive(enrollment, msg) {
   const otOpp = await findOpportunity(contact_id, OT_PIPELINE);
   if (otOpp) await moveOpportunity(otOpp.id, OT_REPLY_RECEIVED);
 
-  // Hand off to conversational AI — it decides demo vs direct booking
+  // Hand off to conversational AI — cold phase must obtain explicit demo permission before any demo is built
   await handleConversationalReply({ ...enrollment, conversation_history: updatedHistory }, msg);
   console.log(`[detect] ${prospect_email} -> positive cold reply, conversational AI engaged`);
 }
