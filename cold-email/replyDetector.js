@@ -168,8 +168,8 @@ async function handlePositive(enrollment, msg) {
     [enrollment.id, JSON.stringify(updatedHistory)]
   );
 
-  // CRM — tag + move to Reply Received (not Demo Sent)
-  await tagContact(contact_id, 'aivoice_reply_received');
+  // CRM — move to Reply Received. The conversational handler applies the
+  // aivoice_reply_received tag to every non-negative reply.
   await addNote(contact_id,
     `Positive reply to cold email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply:\n${msg.snippet}`
   );
