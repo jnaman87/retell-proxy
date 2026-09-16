@@ -40,6 +40,11 @@ const CRM_LOCATION_ID    = process.env.CRM_LOCATION_ID || 'dImqkGzlWhmVksSXL1WY'
 const RAILWAY_PUBLIC_URL = process.env.RAILWAY_PUBLIC_URL;
 const RETELL  = 'https://api.retellai.com';
 const CRM_API = 'https://services.leadconnectorhq.com';
+const CV_PIPELINE = 'Sv3XlTtCmzbGrHrZ3BFL';
+const DEMO_TEST_MIN_SECONDS = 15;
+const DEMO_TEST_BOOKING_GRACE_MINUTES = 10;
+const DEMO_TEST_SWEEP_INTERVAL_MS = 60 * 1000;
+const CALL_BOOKED_STAGE_NAME = 'Call Booked';
 
 
 // City abbreviations for slug collision suffix
@@ -2014,8 +2019,8 @@ app.post('/webhook/retell-call-ended', async (req, res) => {
 
     console.log(`[retell-webhook] agent=${agentId}  duration=${durationSec.toFixed(1)}s`);
 
-    if (durationSec <= 15) {
-      console.log('[retell-webhook] Call ≤15 s — no transition');
+    if (durationSec <= DEMO_TEST_MIN_SECONDS) {
+      console.log(`[retell-webhook] Call ≤${DEMO_TEST_MIN_SECONDS} s — no demo test recorded`);
       return;
     }
 
@@ -2035,13 +2040,19 @@ if (!enrollment) {
   return;
 }
 
-    // A demo is sent from the cold conversation flow, which moves the enrollment
-    // to warm. Only a substantive call while warm counts as the demo being tested
-    // and advances the lead to ultra_warm. Never let a cold/other call create a
-    // false phase transition.
+    // A substantive demo call while warm starts the 10-minute booking grace period.
     if (enrollment.phase === 'warm') {
-      console.log(`[retell-webhook] phase=warm → demo tested → transitionToUltraWarm`);
-      await transitionToUltraWarm(demo.contact_id);
+      const testAt = new Date().toISOString();
+      const update = await emailPool.query(
+        `UPDATE enrollments
+         SET demo_tested_at = COALESCE(demo_tested_at, $1::timestamptz)
+         WHERE contact_id = $2
+         RETURNING demo_tested_at`,
+        [testAt, demo.contact_id]
+      );
+      const recordedAt = update.rows[0]?.demo_tested_at || testAt;
+      await markDemoTested(demo.contact_id);
+      console.log(`[retell-webhook] phase=warm → demo tested (${durationSec.toFixed(1)}s), booking check due at ${new Date(new Date(recordedAt).getTime() + DEMO_TEST_BOOKING_GRACE_MINUTES * 60 * 1000).toISOString()}`);
     } else {
       console.log(`[retell-webhook] phase=${enrollment.phase} → no phase transition`);
     }
@@ -2099,6 +2110,100 @@ async function sweepExpired() {
 }
 setInterval(sweepExpired, 60 * 60 * 1000);
 setTimeout(sweepExpired, 30_000);
+
+// ─────────────────────────────────────────────────────────────────────────
+// DEMO TEST → BOOKING GRACE PERIOD
+// ─────────────────────────────────────────────────────────────────────────
+function normalizeCompanyName(value) {
+  return cleanBusinessName(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+let cachedCallBookedStageId = null;
+
+async function getCallBookedStageId() {
+  if (cachedCallBookedStageId) return cachedCallBookedStageId;
+  const r = await fetch(`${CRM_API}/opportunities/pipelines/${CV_PIPELINE}`, {
+    headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: 'v3' },
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`GHL pipeline lookup failed (${r.status}): ${JSON.stringify(data)}`);
+  const pipelineName = String(data.name || data.pipeline?.name || '').trim();
+  if (pipelineName && pipelineName.toLowerCase() !== 'ai voice receptionist conversions') {
+    throw new Error(`GHL pipeline ID ${CV_PIPELINE} is \"${pipelineName}\", not \"AI Voice Receptionist Conversions\"`);
+  }
+  const stages = data.stages || data.pipeline?.stages || [];
+  const stage = stages.find(s => String(s.name || '').trim().toLowerCase() === CALL_BOOKED_STAGE_NAME.toLowerCase());
+  if (!stage?.id) throw new Error(`GHL stage \"${CALL_BOOKED_STAGE_NAME}\" was not found in AI Voice Receptionist Conversions`);
+  cachedCallBookedStageId = stage.id;
+  console.log(`[booking-check] Resolved Call Booked stage: ${cachedCallBookedStageId}`);
+  return cachedCallBookedStageId;
+}
+
+async function isOnboardingCallBooked(enrollment) {
+  if (!enrollment?.contact_id) return false;
+  const expectedCompany = normalizeCompanyName(enrollment.company_name);
+  if (!expectedCompany) return false;
+
+  const contactRes = await fetch(`${CRM_API}/contacts/${encodeURIComponent(enrollment.contact_id)}`, {
+    headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' },
+  });
+  const contactData = await contactRes.json().catch(() => ({}));
+  if (!contactRes.ok) throw new Error(`GHL contact lookup failed (${contactRes.status}): ${JSON.stringify(contactData)}`);
+  const contact = contactData.contact || contactData;
+  const ghlCompany = contact.companyName || contact.company_name || '';
+  if (normalizeCompanyName(ghlCompany) !== expectedCompany) {
+    console.warn(`[booking-check] Company mismatch for ${enrollment.prospect_email}: enrollment=\"${enrollment.company_name}\" GHL=\"${ghlCompany}\"`);
+    return false;
+  }
+
+  const stageId = await getCallBookedStageId();
+  const params = new URLSearchParams({ locationId: CRM_LOCATION_ID, pipelineId: CV_PIPELINE, pipelineStageId: stageId, contactId: enrollment.contact_id, status: 'all', limit: '100', page: '1' });
+  const oppRes = await fetch(`${CRM_API}/opportunities/search?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: 'v3' },
+  });
+  const oppData = await oppRes.json().catch(() => ({}));
+  if (!oppRes.ok) throw new Error(`GHL opportunity search failed (${oppRes.status}): ${JSON.stringify(oppData)}`);
+
+  const opportunities = Array.isArray(oppData.opportunities) ? oppData.opportunities : [];
+  const booked = opportunities.some(opp => {
+    const oppContactId = opp.contactId || opp.contact_id || opp.contact?.id;
+    const oppCompany = opp.contact?.companyName || opp.contact?.company_name || '';
+    return oppContactId === enrollment.contact_id && (!oppCompany || normalizeCompanyName(oppCompany) === expectedCompany);
+  });
+  console.log(`[booking-check] ${enrollment.prospect_email} Call Booked opportunities=${opportunities.length} booked=${booked}`);
+  return booked;
+}
+
+async function processDemoBookingGracePeriod() {
+  try {
+    const { rows } = await emailPool.query(
+      `SELECT id, contact_id, prospect_email, company_name, phase, status, demo_tested_at
+       FROM enrollments
+       WHERE phase = 'warm'
+         AND status NOT IN ('completed', 'unsubscribed', 'bounced')
+         AND demo_tested_at IS NOT NULL
+         AND demo_tested_at <= NOW() - ($1 * INTERVAL '1 minute')
+       ORDER BY demo_tested_at ASC
+       LIMIT 100`,
+      [DEMO_TEST_BOOKING_GRACE_MINUTES]
+    );
+    for (const enrollment of rows) {
+      try {
+        const booked = await isOnboardingCallBooked(enrollment);
+        if (booked) {
+          await emailPool.query(`UPDATE enrollments SET status = 'completed' WHERE id = $1 AND phase = 'warm' AND status NOT IN ('completed', 'unsubscribed', 'bounced')`, [enrollment.id]);
+          console.log(`[booking-check] ${enrollment.prospect_email} already booked — staying out of ultra_warm`);
+          continue;
+        }
+        await transitionToUltraWarm(enrollment.contact_id);
+      } catch (err) {
+        console.error(`[booking-check] ${enrollment.prospect_email} check failed:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[booking-check] sweep failed:', err.message);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // WARM SEQUENCE — helpers
@@ -2200,10 +2305,6 @@ async function transitionToUltraWarm(contactId) {
     await client.query('COMMIT');
     console.log(`[ultra_warm] Contact ${contactId} transitioned → ultra_warm sequence`);
 
-    markDemoTested(contactId).catch(err =>
-      console.error('[ultra_warm] markDemoTested failed:', err)
-    );
-
     restartCleanupWorkflow(contactId).catch(err =>
       console.error('[ultra_warm] workflow restart failed:', err)
     );
@@ -2281,7 +2382,13 @@ async function restartCleanupWorkflow(contactId) {
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
+async function ensureDemoLifecycleSchema() {
+  await emailPool.query('ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS demo_tested_at TIMESTAMPTZ');
+  console.log('[booking-check] enrollments.demo_tested_at ready');
+}
+
 db.init()
+  .then(ensureDemoLifecycleSchema)
   .then(() => {
     app.listen(PORT, () => {
       console.log('\n=== Creative Copyz Voice AI Proxy ===');
@@ -2294,6 +2401,10 @@ db.init()
       console.log('RAILWAY_PUBLIC_URL: ' + (RAILWAY_PUBLIC_URL || '(not set — optional)'));
       console.log('=====================================\n');
     });
+
+    setInterval(processDemoBookingGracePeriod, DEMO_TEST_SWEEP_INTERVAL_MS);
+    setTimeout(processDemoBookingGracePeriod, 10_000);
+
     // ── Cold email loops ──────────────────────────────────────────────────────
 const saKeys = Object.keys(process.env).filter(k => k.startsWith('GOOGLE_SA_'));
 console.log('[cold-email] SA keys found:', saKeys.length ? saKeys.join(', ') : '(none)');
