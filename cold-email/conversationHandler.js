@@ -186,6 +186,25 @@ function toHtmlEmail(text) {
   return `<div style="font-family:Arial,sans-serif;font-size:14px;color:#333;max-width:600px;">${paragraphs}</div>`;
 }
 
+function hasPricingOrInfoQuestion(text) {
+  const t = String(text || '').toLowerCase();
+  return /\\b(how much|what(?:'s| is| does)?\\s+(?:the\\s+)?(?:cost|price|pricing)|what does.*cost|price|pricing|cost|costs|fee|fees|rate|rates|monthly|per month|setup fee|charge|charges)\\b/.test(t);
+}
+
+function hasExplicitDemoPermission(text) {
+  const t = String(text || '').toLowerCase();
+  return (
+    /\\b(send|share|receive|get|show|see|view|try|test|check out|check it out|look at|have)\\b.{0,60}\\b(demo|demonstration|personalised demo|personalized demo|ai voice receptionist)\\b/.test(t) ||
+    /\\b(demo|demonstration|personalised demo|personalized demo)\\b.{0,60}\\b(send|share|receive|get|show|see|view|try|test|want|would like|love to)\\b/.test(t)
+  );
+}
+
+function shouldBuildDemoForColdReply(text, aiDecision) {
+  if (!aiDecision) return false;
+  if (hasPricingOrInfoQuestion(text) && !hasExplicitDemoPermission(text)) return false;
+  return hasExplicitDemoPermission(text);
+}
+
 // Main: handle an incoming reply conversationally
 async function handleConversationalReply(enrollment, msg) {
   const persona  = getPersona(enrollment.mailbox);
@@ -199,12 +218,32 @@ async function handleConversationalReply(enrollment, msg) {
     const system   = replySystemPrompt({ ...enrollment, conversation_history: withIncoming }, persona);
     const messages = buildMessages({ ...enrollment, conversation_history: withIncoming }, system, 'Subject: ' + msg.subject + '\n\n' + msg.snippet);
     const parsed   = await callOpenAI(messages);
-    aiResult = { reply: parsed.reply || null, buildDemo: Boolean(parsed.buildDemo), sendCalLink: Boolean(parsed.sendCalLink) };
+    const rawIncoming = 'Subject: ' + (msg.subject || '') + '\n' + (msg.snippet || '');
+    const llmBuildDemo = Boolean(parsed.buildDemo);
+    const guardedBuildDemo =
+      enrollment.phase === 'cold'
+        ? shouldBuildDemoForColdReply(rawIncoming, llmBuildDemo)
+        : false;
+
+    if (enrollment.phase === 'cold' && llmBuildDemo && !guardedBuildDemo) {
+      console.log('[conv] demo build blocked by deterministic cold-reply guard for ' + enrollment.prospect_email);
+    }
+
+    aiResult = {
+      reply: parsed.reply || null,
+      buildDemo: guardedBuildDemo,
+      sendCalLink: Boolean(parsed.sendCalLink)
+    };
   } catch (e) {
     console.error('[conv] OpenAI error for ' + enrollment.prospect_email + ':', e.message);
     return;
   }
   if (!aiResult.reply) { console.error('[conv] empty reply for ' + enrollment.prospect_email); return; }
+
+  // Any reply that reaches the conversational handler is non-negative.
+  // Negative/unsubscribe replies are handled separately by replyDetector and receive
+  // only the aivoice_reply_negative tag there.
+  await tagContact(enrollment.contact_id, 'aivoice_reply_received');
 
   // Build only after the AI explicitly determines that a cold lead agreed to receive the demo.
   // Pricing, feature, setup, or other information questions must never trigger a build.
