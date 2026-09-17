@@ -130,7 +130,7 @@ function replySystemPrompt(enrollment, persona) {
     '- City: ' + (enrollment.prospect_city || ''),
     '- ' + demoLine,
     '- If the cold-phase prospect explicitly agrees to receive/see the personalised demo, set buildDemo to true. If they only ask a question or show curiosity, set buildDemo to false.',
-    '',
+    '- When the cold-phase prospect explicitly agrees to receive/see the personalised demo, do NOT say that you will build, prepare, create, get ready, or send the demo later. The demo is created immediately before this reply is sent, and the reply must present the demo as already live and ready to test.',
     'Respond ONLY with valid JSON: {"reply": "full email text", "buildDemo": true or false, "sendCalLink": true or false}',
   ].join('\n');
      }
@@ -284,38 +284,48 @@ async function handleConversationalReply(enrollment, msg) {
   // Build only after the AI explicitly determines that a cold lead agreed to receive the demo.
   // Pricing, feature, setup, or other information questions must never trigger a build.
   let demoUrl = enrollment.demo_page_url || null;
-  if (enrollment.phase === 'cold' && aiResult.buildDemo) {
-    demoUrl = await buildDemoForEnrollment(enrollment);
-    if (!demoUrl) {
-      console.error('[conv] demo build failed for ' + enrollment.prospect_email + '; sending reply without demo link');
-      aiResult.buildDemo = false;
-    } else {
-      // Persist immediately so a transient Gmail send failure does not cause a second
-      // Retell agent/demo to be created on the next inbound reply.
-      await pool.query(
-        'UPDATE enrollments SET demo_page_url = $1 WHERE id = $2',
-        [demoUrl, enrollment.id]
-      );
-    }
-  }
+let demoWasSent = false;
 
-  let replyText = aiResult.reply;
+// Cold-phase demo flow:
+// The prospect has explicitly agreed to receive the demo.
+// Build the demo NOW, before generating/sending the final email.
+if (enrollment.phase === 'cold' && aiResult.buildDemo) {
+  demoUrl = await buildDemoForEnrollment(enrollment);
 
-  // Never allow the model to invent a placeholder demo URL. When a demo is
-  // actually approved and built, append the exact URL returned by /create-agent.
-  if (enrollment.phase === 'cold' && aiResult.buildDemo && demoUrl) {
-    replyText = `${replyText}\n\nHere is your personalised demo: ${demoUrl}`;
+  if (!demoUrl) {
+    console.error(
+      '[conv] demo build failed for ' +
+      enrollment.prospect_email +
+      '; sending reply without demo link'
+    );
+
+    aiResult.buildDemo = false;
+  } else {
+    await pool.query(
+      'UPDATE enrollments SET demo_page_url = $1 WHERE id = $2',
+      [demoUrl, enrollment.id]
+    );
+
+    demoWasSent = true;
   }
+}
+
+let replyText = aiResult.reply;
+
+// IMPORTANT:
+// Once the demo has actually been created, do NOT use the AI-generated
+// "I'll build it / I'll send it later" response.
+// The demo is already live by the time this email is sent.
+if (demoWasSent && demoUrl) {
+  replyText =
+    `Great to hear that you're interested! ` +
+    `Here is your personalised demo: ${demoUrl}\n\n` +
+    `Give it a try and let me know what you think.`;
+}
 
   const rawReply = replyText.replace(/^((Hi|Hello|Dear)\s+\w+[,!]?)\s+/m, '$1\n\n');
   const signOff = `${persona.fullName}\n${persona.title} | Creative Copyz`;
   const cleanReply = toHtmlEmail(cleanReplyFormatting(rawReply) + '\n\n' + signOff);
-
-  const demoWasSent =
-    enrollment.phase === 'cold' &&
-    aiResult.buildDemo === true &&
-    typeof demoUrl === 'string' &&
-    /^https?:\/\//i.test(demoUrl);
 
   let sendResult;
   try {
@@ -324,12 +334,18 @@ async function handleConversationalReply(enrollment, msg) {
     console.error('[conv] send failed for ' + enrollment.prospect_email + ':', e.message);
     return;
   }
-
-  // Only tag the demo as sent after the email containing the demo URL was
-  // successfully handed off to Gmail. Building a demo alone is not enough.
-  if (demoWasSent) {
-    await tagContact(enrollment.contact_id, 'aivoice_demo_sent');
-  }
+  // Only tag the demo as sent after the email containing the demo URL
+// was successfully handed off to Gmail.
+if (
+  demoWasSent &&
+  typeof demoUrl === 'string' &&
+  /^https?:\/\//i.test(demoUrl)
+) {
+  await tagContact(
+    enrollment.contact_id,
+    'aivoice_demo_sent'
+  );
+}
 
   const finalHistory = [
     ...withIncoming,
