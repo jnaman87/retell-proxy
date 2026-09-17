@@ -317,14 +317,17 @@ async function runSendLoop() {
         // Gmail accepted the message. Persist the returned Gmail IDs and the
         // actual send timestamp. The sequence step has already advanced, so a
         // failure here cannot make the same step eligible for another send.
-        await pool.query(
-          `UPDATE enrollments SET
-             thread_id       = COALESCE(thread_id, $2),
-             last_message_id = $3,
-             last_sent_at    = NOW()
-           WHERE id = $1`,
-          [enrollment.id, result.threadId, result.messageId]
-        );
+        const threadId = result?.threadId || enrollment.thread_id || null;
+const messageId = result?.messageId || null;
+
+await pool.query(
+  `UPDATE enrollments SET
+     thread_id       = COALESCE(thread_id, $2::text),
+     last_message_id = $3::text,
+     last_sent_at    = NOW()
+   WHERE id = $1`,
+  [enrollment.id, threadId, messageId]
+);
 
         if (enrollment.step === 0 && enrollment.phase === 'cold') {
           await pool.query(
