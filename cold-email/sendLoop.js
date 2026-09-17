@@ -145,77 +145,113 @@ async function runSendLoop() {
   loopRunning = true;
 
   try {
+    // Only fetch candidate IDs here. Every candidate is re-checked under a
+    // PostgreSQL advisory lock before it can be sent. The old loopRunning flag
+    // only protected one Node process; multiple Railway processes could all
+    // select the same due enrollment and send it.
     const due = await pool.query(
-      `SELECT * FROM enrollments
-       WHERE status IN ('active', 'awaiting_no_reply')
-         AND next_send_at <= NOW()
-       ORDER BY next_send_at ASC
-       LIMIT 6`
+      `SELECT id
+         FROM enrollments
+        WHERE status IN ('active', 'awaiting_no_reply')
+          AND next_send_at <= NOW()
+        ORDER BY next_send_at ASC
+        LIMIT 6`
     );
 
-    for (const enrollment of due.rows) {
-      if (enrollment.status === 'awaiting_no_reply') {
-        await finaliseNoReply(enrollment);
-        continue;
-      }
-
-      if (!isInSendWindow(enrollment.prospect_tz)) continue;
-
-      const template = resolveTemplate(enrollment.phase, enrollment.niche, enrollment.step);
-
-      if (!template) {
-        await pool.query(
-          `UPDATE enrollments SET status = 'completed' WHERE id = $1`,
-          [enrollment.id]
-        );
-        continue;
-      }
-
-      // ── Mailbox selection ──────────────────────────────────
-      let mailbox;
-      if (enrollment.phase === 'warm' || enrollment.phase === 'ultra_warm') {
-        mailbox = enrollment.mailbox;
-        if (!mailbox) {
-          console.log(`[loop] ${enrollment.phase} enrollment ${enrollment.id} has no mailbox assigned — skipping`);
-          continue;
-        }
-      } else if (enrollment.step === 0) {
-        if (capHitIST === todayIST()) {
-          console.log('[loop] daily cap exhausted for today, skipping new lead');
-          continue;
-        }
-        mailbox = await pickMailbox();
-        if (!mailbox) {
-          capHitIST = todayIST();
-          console.log('[loop] no mailbox available — daily cap reached, will retry tomorrow at midnight IST');
-          continue;
-        }
-      } else {
-        mailbox = enrollment.mailbox;
-      }
-
-      const persona = getPersona(mailbox);
-      const e = {
-        ...enrollment,
-        personalisation_hook: sanitizeField(enrollment.personalisation_hook),
-        current_pain:         sanitizeField(enrollment.current_pain),
-      };
-
-      const subject = template.subject(e);
-      const body    = template.body(e, persona)
-        + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".';
+    for (const candidate of due.rows) {
+      const client = await pool.connect();
 
       try {
-        const result = await sendEmail({
-          mailbox,
-          fromName  : persona.fullName,
-          to        : enrollment.prospect_email,
-          subject,
-          body,
-          threadId  : enrollment.thread_id,
-          inReplyTo : enrollment.last_message_id,
-          references: enrollment.last_message_id,
-        });
+        await client.query('BEGIN');
+
+        // Database-wide lock: protects the same enrollment across separate
+        // Railway instances/processes, not just within this Node process.
+        await client.query(
+          `SELECT pg_advisory_xact_lock(hashtext($1))`,
+          [`creativecopyz:send:${candidate.id}`]
+        );
+
+        const freshResult = await client.query(
+          `SELECT * FROM enrollments
+            WHERE id = $1
+              AND status IN ('active', 'awaiting_no_reply')
+              AND next_send_at <= NOW()
+            FOR UPDATE`,
+          [candidate.id]
+        );
+
+        if (!freshResult.rows.length) {
+          await client.query('ROLLBACK');
+          client.release();
+          continue;
+        }
+
+        const enrollment = freshResult.rows[0];
+
+        if (enrollment.status === 'awaiting_no_reply') {
+          await client.query('COMMIT');
+          client.release();
+          await finaliseNoReply(enrollment);
+          continue;
+        }
+
+        if (!isInSendWindow(enrollment.prospect_tz)) {
+          await client.query('ROLLBACK');
+          client.release();
+          continue;
+        }
+
+        const template = resolveTemplate(enrollment.phase, enrollment.niche, enrollment.step);
+
+        if (!template) {
+          await client.query(
+            `UPDATE enrollments SET status = 'completed' WHERE id = $1`,
+            [enrollment.id]
+          );
+          await client.query('COMMIT');
+          client.release();
+          continue;
+        }
+
+        // ── Mailbox selection ──────────────────────────────────
+        let mailbox;
+        if (enrollment.phase === 'warm' || enrollment.phase === 'ultra_warm') {
+          mailbox = enrollment.mailbox;
+          if (!mailbox) {
+            await client.query('ROLLBACK');
+            client.release();
+            console.log(`[loop] ${enrollment.phase} enrollment ${enrollment.id} has no mailbox assigned — skipping`);
+            continue;
+          }
+        } else if (enrollment.step === 0) {
+          if (capHitIST === todayIST()) {
+            await client.query('ROLLBACK');
+            client.release();
+            console.log('[loop] daily cap exhausted for today, skipping new lead');
+            continue;
+          }
+          mailbox = await pickMailbox();
+          if (!mailbox) {
+            capHitIST = todayIST();
+            await client.query('ROLLBACK');
+            client.release();
+            console.log('[loop] no mailbox available — daily cap reached, will retry tomorrow at midnight IST');
+            continue;
+          }
+        } else {
+          mailbox = enrollment.mailbox;
+        }
+
+        const persona = getPersona(mailbox);
+        const e = {
+          ...enrollment,
+          personalisation_hook: sanitizeField(enrollment.personalisation_hook),
+          current_pain:         sanitizeField(enrollment.current_pain),
+        };
+
+        const subject = template.subject(e);
+        const body = template.body(e, persona)
+          + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".';
 
         const nextStep = enrollment.step + 1;
         const seqLen = enrollment.phase === 'ultra_warm'
@@ -231,18 +267,63 @@ async function runSendLoop() {
           ? `NOW() + '3 days'::interval`
           : (isDone ? 'NULL' : `NOW() + $6::INTERVAL`);
 
-        await pool.query(
+        // IMPORTANT: claim/advance the sequence BEFORE calling Gmail, then
+        // commit that claim. This makes the send path idempotent across
+        // multiple processes. The old code sent first and only advanced step
+        // afterward, so any concurrent process (or a post-send DB failure)
+        // could send the same step again.
+        await client.query(
           `UPDATE enrollments SET
              step            = $1,
              mailbox         = $2,
-             thread_id       = COALESCE(thread_id, $3),
-             last_message_id = $4,
-             last_sent_at    = NOW(),
              next_send_at    = ${newNext},
              status          = $5
            WHERE id = $7`,
-          [nextStep, mailbox, result.threadId, result.messageId,
-           newStatus, delayInterval, enrollment.id]
+          [nextStep, mailbox, null, null, newStatus, delayInterval, enrollment.id]
+        );
+
+        await client.query('COMMIT');
+        client.release();
+
+        let result;
+        try {
+          result = await sendEmail({
+            mailbox,
+            fromName  : persona.fullName,
+            to        : enrollment.prospect_email,
+            subject,
+            body,
+            threadId  : enrollment.thread_id,
+            inReplyTo : enrollment.last_message_id,
+            references: enrollment.last_message_id,
+          });
+        } catch (sendErr) {
+          // The sequence step was already claimed. Put this enrollment back
+          // on the failed step so a transient Gmail failure can be retried,
+          // without making concurrent processes eligible for the same send.
+          await pool.query(
+            `UPDATE enrollments
+                SET step = $1,
+                    next_send_at = NOW() + INTERVAL '5 minutes',
+                    status = 'active'
+              WHERE id = $2
+                AND step = $3`,
+            [enrollment.step, enrollment.id, nextStep]
+          ).catch(e => console.error('[loop] failed to release send claim:', e.message));
+
+          throw sendErr;
+        }
+
+        // Gmail accepted the message. Persist the returned Gmail IDs and the
+        // actual send timestamp. The sequence step has already advanced, so a
+        // failure here cannot make the same step eligible for another send.
+        await pool.query(
+          `UPDATE enrollments SET
+             thread_id       = COALESCE(thread_id, $2),
+             last_message_id = $3,
+             last_sent_at    = NOW()
+           WHERE id = $1`,
+          [enrollment.id, result.threadId, result.messageId]
         );
 
         if (enrollment.step === 0 && enrollment.phase === 'cold') {
@@ -263,15 +344,23 @@ async function runSendLoop() {
         }
 
         console.log(`[loop] ✅ step ${enrollment.step} sent to ${enrollment.prospect_email} via ${mailbox} (${enrollment.phase})`);
-
         console.log('[loop] waiting 3 min before next send...');
         await sleep(DRIP_DELAY_MS);
 
       } catch (err) {
-        console.error(`[loop] send failed for ${enrollment.prospect_email}:`, err.message);
+        // The client may already have been released after the pre-send claim.
+        // We only ROLLBACK if this transaction is still active.
+        try {
+          await client.query('ROLLBACK');
+        } catch (_) {}
+        try {
+          client.release();
+        } catch (_) {}
+
+        console.error(`[loop] send failed for candidate ${candidate.id}:`, err.message);
       }
     }
-    
+
     // Conversation follow-ups: nudge leads who got calendar link but haven't replied or booked
     const convDue = await pool.query(
       `SELECT * FROM enrollments
@@ -292,5 +381,4 @@ async function runSendLoop() {
     loopRunning = false;
   }
 }
-
 module.exports = { runSendLoop };
