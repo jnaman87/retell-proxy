@@ -168,8 +168,8 @@ async function handlePositive(enrollment, msg) {
     [enrollment.id, JSON.stringify(updatedHistory)]
   );
 
-  // CRM — move to Reply Received. The conversational handler applies the
-  // aivoice_reply_received tag to every non-negative reply.
+  // CRM — tag + move to Reply Received (not Demo Sent)
+  await tagContact(contact_id, 'aivoice_reply_received');
   await addNote(contact_id,
     `Positive reply to cold email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply:\n${msg.snippet}`
   );
@@ -263,8 +263,6 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
             if (intent === 'negative' || intent === 'unsubscribe') {
               await handleNegative(enrollment, msg, intent === 'unsubscribe');
             } else {
-              // Every non-negative reply gets the reply-received tag.
-              await tagContact(enrollment.contact_id, 'aivoice_reply_received');
               await handleConversationalReply(enrollment, msg);
             }
             continue;
@@ -282,8 +280,6 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
             await handlePositive(enrollment, msg);
           } else {
             // neutral or ongoing conversation -> conversational AI
-            // It is still a reply, so tag it unless it was classified negative above.
-            await tagContact(enrollment.contact_id, 'aivoice_reply_received');
             await handleConversationalReply(enrollment, msg);
           }
         }
