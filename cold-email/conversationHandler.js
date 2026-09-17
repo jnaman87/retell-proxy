@@ -391,11 +391,15 @@ function hasPricingOrInfoQuestion(text) {
 }
 
 function hasExplicitDemoPermission(text) {
-  const t = String(text || '').toLowerCase();
+  const t = String(text || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 
   return (
-    /\b(send|share|receive|get|show|see|view|try|test|check out|check it out|look at|have)\b.{0,60}\b(demo|demonstration|personalised demo|personalized demo|ai voice receptionist)\b/.test(t) ||
-    /\b(demo|demonstration|personalised demo|personalized demo)\b.{0,60}\b(send|share|receive|get|show|see|view|try|test|want|would like|love to)\b/.test(t)
+    /\b(?:send|share|receive|get|show|see|view|try|test|check out|check it out|look at|have)\b.{0,80}\b(?:demo|demonstration)\b/i.test(t) ||
+
+    /\b(?:demo|demonstration)\b.{0,80}\b(?:send|share|receive|get|show|see|view|try|test|want|would like|love to)\b/i.test(t)
   );
 }
 
