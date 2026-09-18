@@ -299,12 +299,12 @@ applyPalette(_cfg.primaryColor || params.get('primary') || '82998A',
 <section class="section"><div class="shell final-cta"><p class="eyebrow" data-copy="ctaEyebrow">The next conversation starts here</p><h2>Let's build one for <span id="cta-biz-name">your team</span>.</h2><p data-copy="ctaSupport">Designed around your calls and workflow.</p><a id="book-btn" class="button" href="https://api.leadconnectorhq.com/widget/bookings/aivoice-onboarding" data-copy="bookButton">Get My AI Receptionist Setup</a></div></section>
     <footer class="shell"><span id="footer-biz-name">Your Restoration Team</span><span>AI Voice Experience · <strong style="color:var(--t);font-weight:600">Creative Copyz</strong></span></footer>
   </main>
-  <script>
-    // ── Server-injected config takes priority over URL params ──
-    /* =========================================================
-       PERSONALIZATION + PALETTE
-       ========================================================= */
-    <script src="/assets/retell-web-client.js"></script><script>
+  <script src="/assets/retell-web-client.js"></script>
+<script>
+  // ── Server-injected config takes priority over URL params ──
+  /* =========================================================
+     PERSONALIZATION + PALETTE
+     ========================================================= */
 (function () {
       var params = window.DEMO_CONFIG ? (function () {
   var _c = window.DEMO_CONFIG;
