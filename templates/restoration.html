@@ -304,13 +304,7 @@ applyPalette(_cfg.primaryColor || params.get('primary') || '82998A',
     /* =========================================================
        PERSONALIZATION + PALETTE
        ========================================================= */
-    import('https://esm.sh/retell-client-js-sdk')
-  .then(function (m) {
-    window.RetellWebClient = m.RetellWebClient;
-  })
-  .catch(function (error) {
-    console.error('Retell SDK failed to load:', error);
-  });
+    <script src="/assets/retell-web-client.js"></script>
 (function () {
       var params = window.DEMO_CONFIG ? (function () {
   var _c = window.DEMO_CONFIG;
