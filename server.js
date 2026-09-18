@@ -1850,6 +1850,10 @@ app.get('/:slug([a-z0-9][a-z0-9-]{2,59})', async (req, res, next) => {
 
 
   html = html.replace('<head>', '<head>' + injected);
+  res.setHeader(
+  'Content-Security-Policy',
+  "connect-src 'self' https://*.livekit.cloud wss://*.livekit.cloud"
+);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.send(html);
 });
