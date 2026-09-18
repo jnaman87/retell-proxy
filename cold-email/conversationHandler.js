@@ -227,8 +227,14 @@ function replySystemPrompt(enrollment, persona) {
     '- Do not generate a greeting or salutation. The application adds the greeting.',
     '- Do not generate a sign-off, closing, sender name, job title, or company signature. The application adds the signature.',
     '- Body: 2 to 4 sentences, no filler phrases',
-    '- cold phase: if the prospect asks about pricing, features, setup, or anything else, answer briefly and guide the conversation back toward getting permission to send the personalised demo. Do NOT send the calendar link or ask them to book a call.',
-    '- cold phase: asking a question, showing curiosity, or asking about cost is NOT the same as agreeing to receive the demo. Only explicit agreement such as "yes", "sure", "send it", or equivalent counts as permission.',
+    'CLASSIFICATION:',
+'- positive: the prospect explicitly agrees to receive the demo or explicitly asks you to send, share, show, or provide the demo or demo link.',
+'- neutral: the prospect asks a question, requests information, expresses curiosity, or responds without explicitly agreeing to receive the demo.',
+'- negative: the prospect says they are not interested, asks to stop receiving emails, unsubscribes, opts out, or otherwise clearly rejects further outreach.',
+'- Never treat a question as positive merely because it contains words like "interesting", "sounds good", "cost", or "how much".',
+'- A demo is created ONLY for positive replies.',
+'- A neutral reply MUST NOT create a demo.',
+'- A negative reply MUST NOT create a demo or send any further email.',
     '- warm phase: focus on getting the prospect to try/test the personalised demo already shared. Do NOT push for an onboarding call merely because they ask questions.',
     '- ultra_warm phase: if the prospect wants to move forward, talk, book, or asks for next steps, set sendCalLink to true and include this link naturally: ' + CALENDAR_LINK,
     '- Whenever a call is mentioned, it must be framed as a call with Naman, never as a call with you/the email persona.',
@@ -247,8 +253,12 @@ function replySystemPrompt(enrollment, persona) {
     '- ' + demoLine,
     '- The application, not the AI, is the final authority on whether a demo should be created.',
     '',
-    'Respond ONLY with valid JSON:',
-    '{"reply":"full email body without greeting or signature","buildDemo":true or false,"sendCalLink":true or false}'
+    'Respond ONLY with valid JSON. Do not include markdown, code fences, or any text outside the JSON object.',
+'The JSON must contain exactly these fields:',
+'{"classification":"positive","reply":"full email body without greeting or signature","sendCalLink":false}',
+'"classification" must be exactly one of: "positive", "neutral", "negative".',
+'"reply" must contain the actual email body.',
+'"sendCalLink" must be a boolean: true or false, never a string.'
   ].join('\n');
 }
 
@@ -384,12 +394,6 @@ function stripAiSignoff(text) {
   return t.trim();
 }
 
-function hasPricingOrInfoQuestion(text) {
-  const t = String(text || '').toLowerCase();
-
-  return /\b(how much|what(?:'s| is| does)?\s+(?:the\s+)?(?:cost|price|pricing)|what does.*cost|price|pricing|cost|costs|fee|fees|rate|rates|monthly|per month|setup fee|charge|charges)\b/.test(t);
-}
-
 function hasExplicitDemoPermission(text) {
   const t = String(text || '')
     .toLowerCase()
@@ -397,71 +401,50 @@ function hasExplicitDemoPermission(text) {
     .trim();
 
   return (
-    /\b(?:send|share|receive|get|show|see|view|try|test|check out|check it out|look at|have)\b.{0,80}\b(?:demo|demonstration)\b/i.test(t) ||
-
-    /\b(?:demo|demonstration)\b.{0,80}\b(?:send|share|receive|get|show|see|view|try|test|want|would like|love to)\b/i.test(t)
+    /\b(send|share|give|show|provide|forward)\b.{0,100}\b(the\s+)?(demo|link|demo link|demonstration)\b/.test(t) ||
+    /\b(the\s+)?(demo|demo link|demonstration)\b.{0,100}\b(send|share|give|show|provide|forward)\b/.test(t) ||
+    /\b(i('| )?d|i would|i want|i'd like|i would like|please)\b.{0,100}\b(test|try|see|check out|look at)\b.{0,100}\b(the\s+)?(demo|link|demo link|it)\b/.test(t) ||
+    /\b(yes|yeah|yep|sure|okay|ok|absolutely|definitely|sounds good|please do|go ahead)\b.{0,100}\b(send|share|give|show|provide|forward)\b/.test(t)
   );
 }
 
-function hasDemoOfferInHistory(history) {
-  const recent = Array.isArray(history)
-    ? history.slice(-6)
-    : [];
+function hasNegativeReply(text) {
+  const t = String(text || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  return recent.some(function (h) {
-    if (h.role !== 'assistant') {
-      return false;
-    }
-
-    const t = String(h.content || '').toLowerCase();
-
-    return (
-      /\b(would you like|do you want|want me to|shall i|can i|should i)\b.{0,100}\b(send|share|receive|see|view|try|test)\b.{0,40}\b(demo|demonstration|ai voice receptionist)\b/.test(t) ||
-      /\b(send|share|receive|see|view|try|test)\b.{0,40}\b(demo|demonstration|personalised demo|personalized demo|ai voice receptionist)\b/.test(t)
-    );
-  });
+  return (
+    /\b(not interested|no thanks|no thank you|don't contact|do not contact|stop contacting|stop emailing|remove me|unsubscribe|opt out|opt-out|take me off|leave me alone|not for me|pass on this|no longer interested)\b/.test(t)
+  );
 }
 
 function hasGenericAffirmation(text) {
-  const t = String(text || '').toLowerCase().trim();
+  const t = String(text || '')
+    .toLowerCase()
+    .trim();
 
-  return /^(yes|yeah|yep|sure|okay|ok|absolutely|definitely|sounds good|that sounds good|please do|go ahead|i'd like that|id like that|yes please)[.!\s]*$/.test(t);
+  return /^(yes|yeah|yep|sure|okay|ok|absolutely|definitely|sounds good|that sounds good|please do|go ahead|i'd like that|id like that|yes please)[.!]?$/.test(t);
 }
 
-// Deterministic demo decision.
-//
-// IMPORTANT:
-// This function does NOT depend on GPT's buildDemo value.
-// The application is the final authority on whether a demo should be created.
-function shouldBuildDemoForColdReply(text, history) {
-  const t = String(text || '').toLowerCase().trim();
+function classifyProspectReply(text) {
+  const t = String(text || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  const explicitDemoPermission = hasExplicitDemoPermission(t);
+  if (hasNegativeReply(t)) {
+    return 'negative';
+  }
 
-  // Pricing/info questions should not trigger a demo unless the prospect
-  // explicitly asks for or agrees to the demo in the same reply.
   if (
-    hasPricingOrInfoQuestion(t) &&
-    !explicitDemoPermission
+    hasExplicitDemoPermission(t) ||
+    hasGenericAffirmation(t)
   ) {
-    return false;
+    return 'positive';
   }
 
-  // Explicit demo permission always triggers the demo.
-  if (explicitDemoPermission) {
-    return true;
-  }
-
-  // Generic affirmations only trigger if a demo was actually offered
-  // in the immediately preceding conversation.
-  if (
-    hasGenericAffirmation(t) &&
-    hasDemoOfferInHistory(history)
-  ) {
-    return true;
-  }
-
-  return false;
+  return 'neutral';
 }
 
 // Main: handle an incoming reply conversationally
@@ -511,31 +494,38 @@ async function handleConversationalReply(enrollment, msg) {
       '\n' +
       (msg.snippet || '');
 
-    // IMPORTANT:
-    // GPT's buildDemo value is intentionally ignored.
-    // Demo creation is determined entirely by application logic.
+const validClassifications = ['positive', 'neutral', 'negative'];
+
+const aiClassification =
+  validClassifications.includes(parsed.classification)
+    ? parsed.classification
+    : 'neutral';
+
+const classification =
+  hasGenericAffirmation(msg.snippet || '')
+    ? 'positive'
+    : aiClassification;
+
+if (classification === 'negative') {
+  await handleNegativeReply(
+    enrollment,
+    msg,
+    msg.snippet || ''
+  );
+
+  return;
+}
+
     const guardedBuildDemo =
-      enrollment.phase === 'cold'
-        ? shouldBuildDemoForColdReply(
-            rawIncoming,
-            withIncoming
-          )
-        : false;
+  enrollment.phase === 'cold' &&
+  classification === 'positive';
 
     aiResult = {
-      reply: parsed.reply || null,
-      buildDemo: guardedBuildDemo,
-      sendCalLink: Boolean(parsed.sendCalLink)
-    };
-  } catch (e) {
-    console.error(
-      '[conv] OpenAI error for ' +
-      enrollment.prospect_email +
-      ':',
-      e.message
-    );
-    return;
-  }
+  reply: parsed.reply || null,
+  buildDemo: guardedBuildDemo,
+  sendCalLink: Boolean(parsed.sendCalLink),
+  classification
+};
 
   if (!aiResult.reply) {
     console.error(
@@ -590,16 +580,17 @@ async function handleConversationalReply(enrollment, msg) {
   // If the demo was successfully created, completely override the AI
   // response so the email contains the real URL.
   if (
-    demoWasSent &&
-    demoUrl
-  ) {
-    replyText =
-      'Great to hear that you\'re interested! ' +
-      'Here is your personalised demo: ' +
-      demoUrl +
-      '\n\n' +
-      'Give it a try and let me know what you think.';
-  } else if (!demoUrl) {
+  classification === 'positive' &&
+  demoWasSent &&
+  demoUrl
+) {
+  replyText =
+    'Great to hear that you\'re interested! ' +
+    'Here is your personalised demo: ' +
+    demoUrl +
+    '\n\n' +
+    'Give it a try and let me know what you think.';
+} else if (!demoUrl) {
     // Prevent the AI from falsely claiming that a demo was created or sent.
     replyText = replyText
       .replace(
@@ -659,6 +650,11 @@ async function handleConversationalReply(enrollment, msg) {
     );
     return;
   }
+
+  await tagContact(
+  enrollment.contact_id,
+  'aivoice_reply_received'
+);
 
   // Only tag the demo as sent after the email containing the demo URL
   // was successfully handed off to Gmail.
@@ -733,6 +729,158 @@ async function handleConversationalReply(enrollment, msg) {
     ')' +
     (demoWasSent ? ' -> warm, demo sent' : '')
   );
+}
+
+async function handleNegativeReply(enrollment, msg, text) {
+  const t = String(text || '').toLowerCase();
+
+  await tagContact(
+    enrollment.contact_id,
+    'aivoice_reply_negative'
+  );
+
+  if (/\b(unsubscribe|opt out|opt-out|remove me|stop emailing|stop contacting|take me off)\b/.test(t)) {
+    await tagContact(
+      enrollment.contact_id,
+      'aivoice_reply_negative'
+    );
+
+    await setContactDnd(enrollment.contact_id);
+  }
+
+  await moveOpportunityToUnsubscribed(enrollment.contact_id);
+
+  await pool.query(
+    'UPDATE enrollments SET status = $1, conv_status = $2, last_conv_at = NOW() WHERE id = $3',
+    [
+      'stopped',
+      'negative',
+      enrollment.id
+    ]
+  );
+
+  console.log(
+    '[conv] ' +
+    enrollment.prospect_email +
+    ' -> negative, outbound stopped'
+  );
+}
+
+async function setContactDnd(contactId) {
+  if (!contactId || !CRM_API_KEY) {
+    return false;
+  }
+
+  try {
+    const r = await fetch(
+      CRM_API + '/contacts/' + encodeURIComponent(contactId),
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer ' + CRM_API_KEY,
+          Version: '2021-04-15',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          dnd: true
+        })
+      }
+    );
+
+    if (!r.ok) {
+      console.error(
+        '[conv] DND failed (' + r.status + '):',
+        await r.text()
+      );
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error('[conv] DND error:', e.message);
+    return false;
+  }
+}
+
+async function moveOpportunityToUnsubscribed(contactId) {
+  if (!contactId || !CRM_API_KEY) {
+    return false;
+  }
+
+  try {
+    const r = await fetch(
+      CRM_API + '/opportunities/search',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + CRM_API_KEY,
+          Version: '2021-04-15',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          locationId: process.env.GHL_LOCATION_ID,
+          contactId: contactId,
+          pipelineName: 'AI Voice Receptionist Outbound Tracking'
+        })
+      }
+    );
+
+    if (!r.ok) {
+      console.error(
+        '[conv] opportunity search failed (' + r.status + '):',
+        await r.text()
+      );
+      return false;
+    }
+
+    const data = await r.json();
+
+    const opportunity =
+      data.opportunities &&
+      data.opportunities[0];
+
+    if (!opportunity || !opportunity.id) {
+      console.warn(
+        '[conv] no outbound opportunity found for ' +
+        contactId
+      );
+      return false;
+    }
+
+    const stageResponse = await fetch(
+      CRM_API + '/opportunities/' +
+        encodeURIComponent(opportunity.id),
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer ' + CRM_API_KEY,
+          Version: '2021-04-15',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          pipelineStageId: process.env.GHL_UNSUBSCRIBED_STAGE_ID
+        })
+      }
+    );
+
+    if (!stageResponse.ok) {
+      console.error(
+        '[conv] opportunity stage update failed (' +
+          stageResponse.status +
+          '):',
+        await stageResponse.text()
+      );
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error(
+      '[conv] opportunity stage error:',
+      e.message
+    );
+    return false;
+  }
 }
 
 // Periodic: send follow-up when no reply after calendar link sent
