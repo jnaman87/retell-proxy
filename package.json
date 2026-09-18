@@ -4,9 +4,11 @@
   "description": "Railway proxy — Creative Copyz AI Voice Receptionist pipeline",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
-  },
+  "build:retell-web-client": "esbuild client/retell-web-client.js --bundle --format=iife --platform=browser --outfile=public/retell-web-client.js",
+  "postinstall": "npm run build:retell-web-client",
+  "start": "node server.js",
+  "dev": "nodemon server.js"
+},
   "engines": {
     "node": ">=18"
   },
