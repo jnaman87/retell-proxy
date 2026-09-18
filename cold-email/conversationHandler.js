@@ -729,6 +729,14 @@ if (classification === 'negative') {
     ')' +
     (demoWasSent ? ' -> warm, demo sent' : '')
   );
+} catch (e) {
+    console.error(
+      '[conv] error while handling reply for ' +
+        enrollment.prospect_email +
+        ':',
+      e.message
+    );
+  }
 }
 
 async function handleNegativeReply(enrollment, msg, text) {
