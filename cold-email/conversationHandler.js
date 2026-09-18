@@ -239,7 +239,9 @@ function replySystemPrompt(enrollment, persona) {
     '- ultra_warm phase: if the prospect wants to move forward, talk, book, or asks for next steps, set sendCalLink to true and include this link naturally: ' + CALENDAR_LINK,
     '- Whenever a call is mentioned, it must be framed as a call with Naman, never as a call with you/the email persona.',
     '- Do not repeat the calendar link if they already have it unless they ask',
-    '- cold phase: end with an open-ended question that moves toward permission to send the demo.',
+    '- cold phase, neutral reply: answer the prospect’s question clearly, then end by asking for explicit permission to send a tailored AI Voice Receptionist demo link for their business.',
+'- The cold-phase CTA must be about sending the tailored demo link or letting them test the tailored receptionist. Do not end with a generic offer for more information, more details, or a call.',
+'- A prospect becomes positive only when they explicitly agree to receive, see, test, or be sent that demo.',
     '- warm phase: end with an open-ended question that encourages them to test the demo or tell you what they think after testing it.',
     '- ultra_warm phase: end with an open-ended question that moves toward scheduling a call with Naman.',
     '- Do not say that a demo has been prepared, created, generated, built, sent, or is ready unless the application provides a demo URL.',
@@ -585,11 +587,12 @@ if (classification === 'negative') {
   demoUrl
 ) {
   replyText =
-    'Great to hear that you\'re interested! ' +
-    'Here is your personalised demo: ' +
-    demoUrl +
-    '\n\n' +
-    'Give it a try and let me know what you think.';
+  'Absolutely. Here is a tailored AI Voice Receptionist page for ' +
+  (enrollment.company_name || 'your business') +
+  ': ' +
+  demoUrl +
+  '\n\n' +
+  'It shows how it could support your business, and you can test the demo agent directly on the page.';
 } else if (!demoUrl) {
     // Prevent the AI from falsely claiming that a demo was created or sent.
     replyText = replyText
