@@ -563,7 +563,7 @@ while (!window.RetellWebClient && waited < 8000) {
 if (!window.RetellWebClient) { setCallState('', 'Voice service is unavailable. Please try again shortly.'); return; }
         isCalling = true; setCallState('connecting', 'Connecting you to Emma…');
         try {
-          var response = await fetch('https://retell-proxy-production.up.railway.app/create-web-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId: agentId }) });
+          var response = await fetch('/create-web-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId: agentId }) });
           if (!response.ok) throw new Error('Call request failed');
           var payload = await response.json();
 if (payload.limitReached) {
