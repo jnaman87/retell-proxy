@@ -72,6 +72,9 @@ async function init(attempt = 1) {
   await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS calendar_sent_at TIMESTAMPTZ`).catch(e => console.warn('[db] calendar_sent_at migration skipped:', e.message));
   await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS last_conv_at TIMESTAMPTZ`).catch(e => console.warn('[db] last_conv_at migration skipped:', e.message));
   await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS conv_followup_at TIMESTAMPTZ`).catch(e => console.warn('[db] conv_followup_at migration skipped:', e.message));
+  await pool.query(
+  `ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS ultra_warm_pending_at TIMESTAMPTZ`
+).catch(e => console.warn('[db] ultra_warm_pending_at migration skipped:', e.message));
   console.log('[db] schema ready');
 
 }
