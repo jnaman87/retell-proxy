@@ -278,13 +278,12 @@
 
     <footer class="shell"><span id="footer-biz-name">Your Towing Company</span><span>AI Voice Experience · <strong style="color:var(--t);font-weight:600">Creative Copyz</strong></span></footer>
   </main>
-
+<script src="/assets/retell-web-client.js"></script>
   <script>
     // ── Server-injected config takes priority over URL params ──
     /* =========================================================
        PERSONALIZATION + PALETTE
        ========================================================= */
-    import('https://esm.sh/retell-client-js-sdk').then(function(m) { window.RetellWebClient = m.RetellWebClient; }).catch(function() {});
 (function () {
       var params = window.DEMO_CONFIG ? (function () {
   var _c = window.DEMO_CONFIG;
@@ -512,11 +511,17 @@
         if (isCalling) { if (client && typeof client.stopCall === 'function') client.stopCall(); finishCall('Call ended.'); return; }
         if (!agentId) { setCallState('', 'This voice experience is being configured.'); return; }
         var waited = 0;
-        while (!window.RetellWebClient && waited < 8000) { await new Promise(function(r) { setTimeout(r, 100); }); waited += 100; }
-        if (!window.RetellWebClient) { setCallState('', 'Voice service is unavailable. Please try again shortly.'); return; }
+while (!window.RetellWebClient && waited < 8000) {
+  await new Promise(function(r) { setTimeout(r, 100); });
+  waited += 100;
+}
+if (!window.RetellWebClient) {
+  setCallState('', 'Voice service is unavailable. Please try again shortly.');
+  return;
+}
         isCalling = true; setCallState('connecting', 'Connecting you to Emma…');
         try {
-          var response = await fetch('https://retell-proxy-production.up.railway.app/create-web-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId: agentId }) });
+          var response = await fetch('/create-web-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId: agentId }) });
           if (!response.ok) throw new Error('Call request failed');
           var payload = await response.json();
           if (payload.limitReached) {
