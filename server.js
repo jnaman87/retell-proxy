@@ -1692,10 +1692,13 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
     console.log(`[retell-tools/book-appointment] ✅ Booked — id: ${data.id || data.appointmentId}`);
     // Stop cold email sequence if this email is enrolled
     emailPool.query(
-      `UPDATE enrollments SET status = 'completed'
-       WHERE prospect_email = $1 AND status = 'active'`,
-      [email.toLowerCase().trim()]
-    ).then(r => {
+  `UPDATE enrollments
+      SET status = 'completed',
+          ultra_warm_pending_at = NULL
+    WHERE prospect_email = $1
+      AND status = 'active'`,
+  [email.toLowerCase().trim()]
+).then(r => {
       if (r.rowCount > 0) console.log(`[book-appointment] ✅ cold email stopped for ${email}`);
     }).catch(e => console.error('[book-appointment] email stop failed:', e.message));
     return res.json({
@@ -2046,16 +2049,17 @@ if (!enrollment) {
   return;
 }
 
-    // A demo is sent from the cold conversation flow, which moves the enrollment
-    // to warm. Only a substantive call while warm counts as the demo being tested
-    // and advances the lead to ultra_warm. Never let a cold/other call create a
-    // false phase transition.
     if (enrollment.phase === 'warm') {
-      console.log(`[retell-webhook] phase=warm → demo tested → transitionToUltraWarm`);
-      await transitionToUltraWarm(demo.contact_id);
-    } else {
-      console.log(`[retell-webhook] phase=${enrollment.phase} → no phase transition`);
-    }
+  console.log(
+    `[retell-webhook] phase=warm → demo tested → scheduling ultra_warm in 10 minutes`
+  );
+
+  await scheduleUltraWarm(demo.contact_id);
+} else {
+  console.log(
+    `[retell-webhook] phase=${enrollment.phase} → no phase transition`
+  );
+}
 
   } catch (err) {
     console.error('[retell-webhook] Unhandled error:', err);
@@ -2169,18 +2173,23 @@ async function transitionToWarm(contactId) {
 
 async function transitionToUltraWarm(contactId) {
   const client = await emailPool.connect();
+
   try {
     await client.query('BEGIN');
 
     const { rows } = await client.query(
-      `SELECT id, phase, status FROM enrollments WHERE contact_id = $1 LIMIT 1`,
+      `SELECT id, phase, status
+         FROM enrollments
+        WHERE contact_id = $1
+        LIMIT 1
+        FOR UPDATE`,
       [contactId]
     );
 
     if (!rows.length) {
       console.log(`[ultra_warm] No enrollment for contact ${contactId}`);
       await client.query('ROLLBACK');
-      return;
+      return false;
     }
 
     const { phase, status } = rows[0];
@@ -2188,28 +2197,38 @@ async function transitionToUltraWarm(contactId) {
     if (phase === 'ultra_warm') {
       console.log(`[ultra_warm] Contact ${contactId} already in ultra_warm — skipping`);
       await client.query('ROLLBACK');
-      return;
+      return false;
     }
 
-    if (['completed', 'unsubscribed', 'bounced'].includes(status)) {
+    if (['completed', 'unsubscribed', 'bounced', 'stopped'].includes(status)) {
       console.log(`[ultra_warm] Contact ${contactId} is "${status}" — skipping`);
       await client.query('ROLLBACK');
-      return;
+      return false;
+    }
+
+    if (phase !== 'warm') {
+      console.log(`[ultra_warm] Contact ${contactId} is phase="${phase}" — skipping`);
+      await client.query('ROLLBACK');
+      return false;
     }
 
     await client.query(
       `UPDATE enrollments
-       SET phase        = 'ultra_warm',
-           step         = 0,
-           status       = 'active',
-           next_send_at = NOW(),
-           last_sent_at = NULL
-       WHERE contact_id = $1`,
+          SET phase                = 'ultra_warm',
+              step                 = 0,
+              status               = 'active',
+              next_send_at         = NOW(),
+              last_sent_at         = NULL,
+              ultra_warm_pending_at = NULL
+        WHERE contact_id = $1`,
       [contactId]
     );
 
     await client.query('COMMIT');
-    console.log(`[ultra_warm] Contact ${contactId} transitioned → ultra_warm sequence`);
+
+    console.log(
+      `[ultra_warm] Contact ${contactId} transitioned → ultra_warm sequence`
+    );
 
     markDemoTested(contactId).catch(err =>
       console.error('[ultra_warm] markDemoTested failed:', err)
@@ -2219,12 +2238,39 @@ async function transitionToUltraWarm(contactId) {
       console.error('[ultra_warm] workflow restart failed:', err)
     );
 
+    return true;
+
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
   } finally {
     client.release();
   }
+}
+async function scheduleUltraWarm(contactId) {
+  const { rows } = await emailPool.query(
+    `UPDATE enrollments
+        SET ultra_warm_pending_at = NOW() + INTERVAL '10 minutes'
+      WHERE contact_id = $1
+        AND phase = 'warm'
+        AND status = 'active'
+        AND ultra_warm_pending_at IS NULL
+      RETURNING prospect_email, ultra_warm_pending_at`,
+    [contactId]
+  );
+
+  if (!rows.length) {
+    console.log(
+      `[ultra_warm] No eligible warm enrollment to schedule for ${contactId}`
+    );
+    return false;
+  }
+
+  console.log(
+    `[ultra_warm] ${rows[0].prospect_email} scheduled for ${rows[0].ultra_warm_pending_at}`
+  );
+
+  return true;
 }
 
 async function markDemoTested(contactId) {
