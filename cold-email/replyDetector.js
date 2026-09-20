@@ -91,24 +91,77 @@ async function moveOpportunity(oppId, stageId) {
 
 async function createConversionOpportunity(contactId, companyName) {
   try {
+    const existing = await pool.query(
+      `SELECT conversions_opp_id
+         FROM enrollments
+        WHERE contact_id = $1
+          AND conversions_opp_id IS NOT NULL
+        LIMIT 1`,
+      [contactId]
+    );
+
+    if (existing.rows[0]?.conversions_opp_id) {
+      console.log(
+        `[detect] Conversions opp already exists for ${contactId}: ${existing.rows[0].conversions_opp_id}`
+      );
+
+      return existing.rows[0].conversions_opp_id;
+    }
+
     const r = await fetch(`${CRM_API}/opportunities`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${CRM_API_KEY}`,
+        Version: '2021-07-28',
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({
-        pipelineId: CV_PIPELINE, locationId: LOCATION_ID,
+        pipelineId: CV_PIPELINE,
+        locationId: LOCATION_ID,
         name: `${companyName || 'Lead'} -- AI Voice Demo`,
-        pipelineStageId: CV_DEMO_SENT, status: 'open', contactId,
+        pipelineStageId: CV_DEMO_SENT,
+        status: 'open',
+        contactId
       }),
     });
+
     const d = await r.json();
-    if (!r.ok) { console.error('[detect] cv opp create failed:', r.status, JSON.stringify(d)); return; }
-    console.log(`[detect] Conversions opp created for ${companyName}`);
-    const oppId = d.opportunity && d.opportunity.id;
-    if (oppId) {
-      await pool.query('UPDATE enrollments SET conversions_opp_id = $1 WHERE contact_id = $2', [oppId, contactId]);
+
+    if (!r.ok) {
+      console.error(
+        '[detect] cv opp create failed:',
+        r.status,
+        JSON.stringify(d)
+      );
+      return null;
     }
+
+    const oppId = d.opportunity?.id;
+
+    if (!oppId) {
+      console.error(
+        '[detect] cv opp created but no opportunity ID returned:',
+        JSON.stringify(d)
+      );
+      return null;
+    }
+
+    await pool.query(
+      `UPDATE enrollments
+          SET conversions_opp_id = $1
+        WHERE contact_id = $2`,
+      [oppId, contactId]
+    );
+
+    console.log(
+      `[detect] Conversions opp created: ${oppId} for ${companyName}`
+    );
+
+    return oppId;
+
   } catch (e) {
     console.error('[detect] cv opp error:', e.message);
+    return null;
   }
 }
 // OpenAI reply classification
@@ -261,10 +314,26 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
             const intent = await classifyReply(msg.subject, msg.snippet);
             console.log(`[detect] ${enrollment.prospect_email} ${enrollment.phase} reply classified: ${intent}`);
             if (intent === 'negative' || intent === 'unsubscribe') {
-              await handleNegative(enrollment, msg, intent === 'unsubscribe');
-            } else {
-              await handleConversationalReply(enrollment, msg);
-            }
+  await handleNegative(enrollment, msg, intent === 'unsubscribe');
+} else {
+  const cvOpp = await findOpportunity(
+    enrollment.contact_id,
+    CV_PIPELINE
+  );
+
+  if (cvOpp) {
+    await moveOpportunity(
+      cvOpp.id,
+      CV_REPLY_RECEIVED
+    );
+  } else {
+    console.error(
+      `[detect] No Conversions opportunity found for ${enrollment.contact_id} on reply`
+    );
+  }
+
+  await handleConversationalReply(enrollment, msg);
+}
             continue;
           }
 
@@ -279,9 +348,24 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
           } else if (intent === 'positive') {
             await handlePositive(enrollment, msg);
           } else {
-            // neutral or ongoing conversation -> conversational AI
-            await handleConversationalReply(enrollment, msg);
-          }
+  const otOpp = await findOpportunity(
+    enrollment.contact_id,
+    OT_PIPELINE
+  );
+
+  if (otOpp) {
+    await moveOpportunity(
+      otOpp.id,
+      OT_REPLY_RECEIVED
+    );
+  } else {
+    console.error(
+      `[detect] No outbound opportunity found for ${enrollment.contact_id} on neutral reply`
+    );
+  }
+
+  await handleConversationalReply(enrollment, msg);
+}
         }
       } catch (err) {
         console.error(`[detect] failed for ${email}:`, err.message);
@@ -292,4 +376,9 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
   }
 }
 
-module.exports = { detectRepliesAndBounces };
+module.exports = {
+  detectRepliesAndBounces,
+  findOpportunity,
+  moveOpportunity,
+  createConversionOpportunity,
+};
