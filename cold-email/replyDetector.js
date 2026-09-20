@@ -26,11 +26,48 @@ const CV_NO_SHOW = '50e8d59a-14a2-429d-9121-cb539f567e7a';
 const CV_CLOSED_WON = 'b6371df8-ec81-49ee-9fd8-0e1c4daefa30';
 // CRM helpers
 async function tagContact(contactId, tag) {
-  await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-04-15', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tags: [tag] }),
-  }).catch(e => console.error('[detect] tag failed:', e.message));
+  if (!contactId || !tag || !CRM_API_KEY) {
+    console.error(
+      '[detect] tag skipped: missing contactId, tag, or CRM_API_KEY'
+    );
+    return false;
+  }
+
+  try {
+    const r = await fetch(
+      `${CRM_API}/contacts/${encodeURIComponent(contactId)}/tags`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${CRM_API_KEY}`,
+          Version: '2021-04-15',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tags: [tag] }),
+      }
+    );
+
+    const responseText = await r.text();
+
+    if (!r.ok) {
+      console.error(
+        `[detect] tag ${tag} failed for ${contactId}: ${r.status} ${responseText}`
+      );
+      return false;
+    }
+
+    console.log(
+      `[detect] tag applied: ${tag} -> ${contactId}`
+    );
+
+    return true;
+  } catch (e) {
+    console.error(
+      `[detect] tag ${tag} request failed for ${contactId}:`,
+      e.message
+    );
+    return false;
+  }
 }
 
 async function addNote(contactId, body) {
@@ -387,4 +424,5 @@ module.exports = {
   findOpportunity,
   moveOpportunity,
   createConversionOpportunity,
+  tagContact,
 };
