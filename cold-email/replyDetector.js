@@ -9,15 +9,21 @@ const LOCATION_ID = process.env.CRM_LOCATION_ID || 'dImqkGzlWhmVksSXL1WY';
 const OPENAI_KEY  = process.env.OPENAI_API_KEY;
 
 // Pipelines & stages
-const OT_PIPELINE             = 'NxoKeydZvDnkQEM8u6sy';
-const OT_REPLY_RECEIVED       = 'ad4c1fd7-e0bf-4101-9e1e-3e04a7ec81e2';
-const OT_UNSUB_NOT_INTERESTED = '8c9f1603-53f3-4917-97b0-4a89e6507ce6';
-const OT_DEMO_SENT            = 'aed1858d-3090-43da-bf3c-3e398795d4da';
+const OT_PIPELINE = 'NxoKeydZvDnkQEM8u6sy';
+const OT_REPLY_RECEIVED = 'ad4c1fd7-e0bf-4101-9e1e-3e04a7ec81e2';
+const OT_UNSUBSCRIBED = '8c9f1603-53f3-4917-97b0-4a89e6507ce6';
+const OT_NO_REPLIES = 'cc480a05-61e8-482b-b0c2-430986b64826';
+const OT_DEMO_SENT = 'aed1858d-3090-43da-bf3c-3e398795d4da';
 
-const CV_PIPELINE             = 'Sv3XlTtCmzbGrHrZ3BFL';
-const CV_DEMO_SENT            = 'aaedbe52-060f-4d30-a6b3-21b3f8222812';
-const CV_REPLY_RECEIVED       = 'fa5d74ec-aa3f-44d7-89f4-0e59c41788b9';
-const CV_UNSUB_NOT_INTERESTED = '0c0ed89a-9e9c-4e5a-b9c2-d61c5f2d7416';
+const CV_PIPELINE = 'Sv3XlTtCmzbGrHrZ3BFL';
+const CV_DEMO_SENT = 'aaedbe52-060f-4d30-a6b3-21b3f8222812';
+const CV_DEMO_TESTED = '1a42d192-dc15-4dd0-bd68-f7fef2842dd0';
+const CV_DEMO_EXPIRED = '66ed8785-791e-442a-ba47-ceaae2315ccd';
+const CV_UNSUBSCRIBED = '0c0ed89a-9e9c-4e5a-b9c2-d61c5f2d7416';
+const CV_REPLY_RECEIVED = 'fa5d74ec-aa3f-44d7-89f4-0e59c41788b9';
+const CV_CALL_BOOKED = '3c225fbe-d97d-41ad-ba0e-0c6ede8b4a98';
+const CV_NO_SHOW = '50e8d59a-14a2-429d-9121-cb539f567e7a';
+const CV_CLOSED_WON = 'b6371df8-ec81-49ee-9fd8-0e1c4daefa30';
 // CRM helpers
 async function tagContact(contactId, tag) {
   await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
@@ -113,7 +119,7 @@ async function createConversionOpportunity(contactId, companyName) {
       headers: {
         Authorization: `Bearer ${CRM_API_KEY}`,
         Version: '2021-07-28',
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         pipelineId: CV_PIPELINE,
@@ -121,7 +127,7 @@ async function createConversionOpportunity(contactId, companyName) {
         name: `${companyName || 'Lead'} -- AI Voice Demo`,
         pipelineStageId: CV_DEMO_SENT,
         status: 'open',
-        contactId
+        contactId,
       }),
     });
 
