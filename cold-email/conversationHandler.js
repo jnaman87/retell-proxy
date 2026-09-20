@@ -3,6 +3,11 @@
 const pool = require('./pool');
 const { sendEmail } = require('./gmail-sender');
 const { buildDemoForEnrollment } = require('./demoBuilder');
+const {
+  findOpportunity,
+  moveOpportunity,
+  createConversionOpportunity,
+} = require('./replyDetector');
 
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const CALENDAR_LINK = 'https://api.leadconnectorhq.com/widget/bookings/aivoice-onboarding';
@@ -12,6 +17,8 @@ const FOLLOWUP_DAYS = 2;
 // Kept local to avoid a circular dependency with replyDetector.js.
 const CRM_API = 'https://services.leadconnectorhq.com';
 const CRM_API_KEY = process.env.CRM_API_KEY;
+const OT_PIPELINE = 'NxoKeydZvDnkQEM8u6sy';
+const OT_DEMO_SENT = 'aed1858d-3090-43da-bf3c-3e398795d4da';
 
 async function tagContact(contactId, tag) {
   if (!contactId || !tag || !CRM_API_KEY) {
@@ -662,15 +669,41 @@ if (classification === 'negative') {
   // Only tag the demo as sent after the email containing the demo URL
   // was successfully handed off to Gmail.
   if (
-    demoWasSent &&
-    typeof demoUrl === 'string' &&
-    /^https?:\/\//i.test(demoUrl)
-  ) {
-    await tagContact(
-      enrollment.contact_id,
-      'aivoice_demo_sent'
+  demoWasSent &&
+  typeof demoUrl === 'string' &&
+  /^https?:\/\//i.test(demoUrl)
+) {
+  const contactId = enrollment.contact_id;
+
+  // Tag contact
+  await tagContact(
+    contactId,
+    'aivoice_demo_sent'
+  );
+
+  // Pipeline I → Demo Sent
+  const outboundOpp = await findOpportunity(
+    contactId,
+    OT_PIPELINE
+  );
+
+  if (outboundOpp) {
+    await moveOpportunity(
+      outboundOpp.id,
+      OT_DEMO_SENT
+    );
+  } else {
+    console.error(
+      `[conv] No outbound opportunity found for ${contactId} when demo was sent`
     );
   }
+
+  // Pipeline II → create Demo Sent opportunity
+  await createConversionOpportunity(
+    contactId,
+    enrollment.company_name
+  );
+}
 
   const finalHistory = [
     ...withIncoming,
