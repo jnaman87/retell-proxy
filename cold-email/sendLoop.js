@@ -138,7 +138,7 @@ async function finaliseNoReply(enrollment) {
 
 async function processPendingUltraWarm() {
   const { rows } = await pool.query(
-    `SELECT id, contact_id, prospect_email
+    `SELECT id, prospect_email
        FROM enrollments
       WHERE phase = 'warm'
         AND status = 'active'
@@ -155,7 +155,7 @@ async function processPendingUltraWarm() {
       await client.query('BEGIN');
 
       const { rows: freshRows } = await client.query(
-        `SELECT id, contact_id, phase, status
+        `SELECT id, phase, status
            FROM enrollments
           WHERE id = $1
           FOR UPDATE`,
@@ -169,10 +169,8 @@ async function processPendingUltraWarm() {
 
       const fresh = freshRows[0];
 
-      if (
-        fresh.phase !== 'warm' ||
-        fresh.status !== 'active'
-      ) {
+      // Only continue if the lead is STILL active after the 10-minute wait.
+      if (fresh.phase !== 'warm' || fresh.status !== 'active') {
         await client.query(
           `UPDATE enrollments
               SET ultra_warm_pending_at = NULL
@@ -184,14 +182,14 @@ async function processPendingUltraWarm() {
         continue;
       }
 
+      // 10 minutes elapsed and status is still active:
+      // transition to ultra-warm and make step 0 immediately due.
       await client.query(
         `UPDATE enrollments
-            SET phase                 = 'ultra_warm',
-                step                  = 0,
-                status                = 'active',
-                next_send_at          = NOW(),
-                last_sent_at          = NULL,
-                ultra_warm_pending_at = NULL
+            SET phase                  = 'ultra_warm',
+                step                   = 0,
+                next_send_at           = NOW(),
+                ultra_warm_pending_at  = NULL
           WHERE id = $1`,
         [fresh.id]
       );
@@ -202,13 +200,10 @@ async function processPendingUltraWarm() {
         `[ultra_warm] ⏱️ 10-minute wait complete → ${enrollment.prospect_email}`
       );
 
-      // Immediately run the send loop so step 0 goes out now.
       await runSendLoop(true);
 
     } catch (err) {
-      try {
-        await client.query('ROLLBACK');
-      } catch (_) {}
+      try { await client.query('ROLLBACK'); } catch (_) {}
 
       console.error(
         `[ultra_warm] pending transition failed for ${enrollment.prospect_email}:`,
