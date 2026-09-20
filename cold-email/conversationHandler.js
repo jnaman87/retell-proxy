@@ -1064,5 +1064,6 @@ async function sendConvFollowUp(enrollment) {
 
 module.exports = {
   handleConversationalReply,
-  sendConvFollowUp
+  sendConvFollowUp,
+  getPersona
 };
