@@ -287,10 +287,10 @@ async function handleNegative(enrollment, msg, isUnsub) {
     `${isUnsub ? 'Unsubscribed' : 'Not interested'} reply to ${phase} email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply preview:\n${msg.snippet}`);
   if (phase === 'cold') {
     const opp = await findOpportunity(contact_id, OT_PIPELINE);
-    if (opp) await moveOpportunity(opp.id, OT_UNSUB_NOT_INTERESTED);
+    if (opp) await moveOpportunity(opp.id, OT_UNSUBSCRIBED);
   } else {
     const cvOpp = await findOpportunity(contact_id, CV_PIPELINE);
-    if (cvOpp) await moveOpportunity(cvOpp.id, CV_UNSUB_NOT_INTERESTED);
+    if (cvOpp) await moveOpportunity(cvOpp.id, CV_UNSUBSCRIBED);
   }
   console.log(`[detect] ${prospect_email} -> ${isUnsub ? 'unsubscribed' : 'not interested'} (phase: ${phase})`);
 }
