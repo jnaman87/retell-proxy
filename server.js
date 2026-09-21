@@ -1948,39 +1948,111 @@ app.post('/delete-agent', async (req, res) => {
 //    or { "contactId": "abc123" }            ← fallback
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/webhook/call-booked', async (req, res) => {
-  const raw      = { ...(req.body || {}), ...((req.body && req.body.customData) || {}) };
-  const email    = (raw.email || raw.Email || raw.prospect_email || '').toLowerCase().trim();
-  const contactId = raw.contactId || raw.contact_id || raw.id || '';
+  const raw = {
+  ...(req.body || {}),
+  ...((req.body && req.body.customData) || {})
+};
 
-  if (!email && !contactId) {
-    return res.status(400).json({ error: 'email or contactId required' });
+const email = (raw.email || raw.Email || raw.prospect_email || '')
+  .toLowerCase()
+  .trim();
+
+const contactId = raw.contactId || raw.contact_id || raw.id || '';
+
+let crmCompanyName =
+  raw.companyName ||
+  raw.company_name ||
+  raw.businessName ||
+  raw.business_name ||
+  '';
+
+if (!crmCompanyName && contactId) {
+  const contactRes = await fetch(
+    `${CRM_API}/contacts/${encodeURIComponent(contactId)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${CRM_API_KEY}`,
+        Version: '2021-07-28'
+      }
+    }
+  );
+
+  const contactData = await contactRes.json().catch(() => ({}));
+
+  if (!contactRes.ok) {
+    throw new Error(
+      `CRM contact lookup failed (${contactRes.status}): ${JSON.stringify(contactData)}`
+    );
   }
 
-  try {
-    let result;
-    if (email) {
-      result = await emailPool.query(
-        `UPDATE enrollments SET status = 'completed'
-         WHERE prospect_email = $1 AND status = 'active'
-         RETURNING prospect_email`,
-        [email]
-      );
-    } else {
-      result = await emailPool.query(
-        `UPDATE enrollments SET status = 'completed'
-         WHERE contact_id = $1 AND status = 'active'
-         RETURNING prospect_email`,
-        [contactId]
-      );
+  const contact = contactData.contact || contactData;
+
+  crmCompanyName =
+    contact.companyName ||
+    contact.company_name ||
+    '';
+}
+
+  if (!crmCompanyName) {
+  return res.status(400).json({ error: 'company name required' });
+}
+
+      try {
+    const normalizedCrmCompany = normalizeCompanyName(crmCompanyName);
+
+    if (!normalizedCrmCompany) {
+      console.warn('[call-booked] No usable company name received from CRM');
+      return res.json({
+        success: true,
+        stopped: 0,
+        note: 'No usable company name'
+      });
     }
 
-    if (result.rows.length > 0) {
-      console.log(`[call-booked] ✅ emails stopped for ${result.rows[0].prospect_email}`);
-      return res.json({ success: true, stopped: result.rows[0].prospect_email });
-    } else {
-      console.log(`[call-booked] no active enrollment found for ${email || contactId}`);
-      return res.json({ success: true, stopped: null, note: 'No active enrollment found' });
+    const { rows: activeEnrollments } = await emailPool.query(
+      `SELECT id, prospect_email, company_name
+       FROM enrollments
+       WHERE status = 'active'
+         AND company_name IS NOT NULL
+         AND company_name <> ''`
+    );
+
+    const matchingIds = activeEnrollments
+      .filter(row => normalizeCompanyName(row.company_name) === normalizedCrmCompany)
+      .map(row => row.id);
+
+    if (matchingIds.length === 0) {
+      console.log(
+        `[call-booked] no active enrollments found for company "${crmCompanyName}"`
+      );
+
+      return res.json({
+        success: true,
+        stopped: 0,
+        company: crmCompanyName,
+        note: 'No active enrollment found for company'
+      });
     }
+
+    const result = await emailPool.query(
+      `UPDATE enrollments
+       SET status = 'completed',
+           ultra_warm_pending_at = NULL
+       WHERE id = ANY($1::int[])
+       RETURNING prospect_email, company_name`,
+      [matchingIds]
+    );
+
+    console.log(
+      `[call-booked] ✅ emails stopped for ${result.rows.length} enrollment(s) matching company "${crmCompanyName}"`
+    );
+
+    return res.json({
+      success: true,
+      stopped: result.rows.length,
+      company: crmCompanyName,
+      emails: result.rows.map(r => r.prospect_email)
+    });
   } catch (e) {
     console.error('[call-booked] error:', e.message);
     return res.status(500).json({ error: e.message });
@@ -2078,6 +2150,14 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Unexpected server error', message: err.message });
 });
 
+
+function normalizeCompanyName(value) {
+  return cleanBusinessName(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EXPIRY SWEEP
