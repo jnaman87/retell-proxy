@@ -134,7 +134,7 @@ async function findOpportunity(contactId, pipelineId) {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${CRM_API_KEY}`,
-          Version: '2021-04-15',
+          Version: 'v3',
           Accept: 'application/json',
         },
       }
