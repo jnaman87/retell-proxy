@@ -109,11 +109,26 @@ async function enableDND(contactId, channels) {
 
 async function findOpportunity(contactId, pipelineId) {
   try {
-    const r = await fetch(
-      `${CRM_API}/opportunities/search?location_id=${LOCATION_ID}&contact_id=${contactId}&pipeline_id=${pipelineId}`,
-      { headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28' } }
-    );
-    const rtext = await r.text(); let d = {}; try { if (rtext) d = JSON.parse(rtext); } catch {}
+    const r = await fetch(`${CRM_API}/opportunities/search`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${CRM_API_KEY}`,
+        Version: '2021-04-15',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        locationId: LOCATION_ID,
+        contactId,
+        pipelineId,
+      }),
+    });
+
+    const rtext = await r.text();
+    let d = {};
+    try {
+      if (rtext) d = JSON.parse(rtext);
+    } catch {}
+
     return (d.opportunities && d.opportunities[0]) || null;
   } catch (e) {
     console.error('[detect] opp search error:', e.message);
@@ -259,10 +274,12 @@ async function handlePositive(enrollment, msg) {
       timestamp: new Date().toISOString(), phase: 'cold', msgId: msg.id }
   ];
   await pool.query(
-    `UPDATE enrollments SET positive_reply_at = NOW(), status = 'replied',
-     conversation_history = $2::jsonb WHERE id = $1`,
-    [enrollment.id, JSON.stringify(updatedHistory)]
-  );
+  `UPDATE enrollments SET
+     positive_reply_at = NOW(),
+     conversation_history = $2::jsonb
+   WHERE id = $1`,
+  [enrollment.id, JSON.stringify(updatedHistory)]
+);
 
   // CRM — tag + move to Reply Received (not Demo Sent)
   await tagContact(contact_id, 'aivoice_reply_received');
