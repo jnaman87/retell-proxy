@@ -109,27 +109,40 @@ async function enableDND(contactId, channels) {
 
 async function findOpportunity(contactId, pipelineId) {
   try {
-    const r = await fetch(`${CRM_API}/opportunities/search`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${CRM_API_KEY}`,
-        Version: '2021-04-15',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        locationId: LOCATION_ID,
-        contactId,
-        pipelineId,
-      }),
+    const params = new URLSearchParams({
+      locationId: LOCATION_ID,
+      contactId,
+      pipelineId,
     });
 
+    const r = await fetch(
+      `${CRM_API}/opportunities/search?${params.toString()}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${CRM_API_KEY}`,
+          Version: '2021-07-28',
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
     const rtext = await r.text();
+
     let d = {};
     try {
       if (rtext) d = JSON.parse(rtext);
     } catch {}
 
+    if (!r.ok) {
+      console.error(
+        `[detect] opportunity search failed (${r.status}): ${rtext}`
+      );
+      return null;
+    }
+
     return (d.opportunities && d.opportunities[0]) || null;
+
   } catch (e) {
     console.error('[detect] opp search error:', e.message);
     return null;
