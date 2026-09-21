@@ -355,21 +355,6 @@ if (!claim.rows.length) {
 }
 
 enrollment = claim.rows[0];
-          const claim = await pool.query(
-  `UPDATE enrollments
-      SET last_inbound_message_id = $1
-    WHERE id = $2
-      AND (last_inbound_message_id IS DISTINCT FROM $1)
-    RETURNING *`,
-  [msg.id, enrollment.id]
-);
-
-if (!claim.rows.length) {
-  console.log(
-    `[detect] ${enrollment.prospect_email} -- inbound message ${msg.id} already processed, skipping`
-  );
-  continue;
-}
           const msgTs     = msg.internalDate ? Number(msg.internalDate) : msg.date ? new Date(msg.date).getTime() : null;
 const enrolledTs = enrollment.enrolled_at ? new Date(enrollment.enrolled_at).getTime() : null;
 if (msgTs && enrolledTs && msgTs < enrolledTs) {
