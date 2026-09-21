@@ -30,6 +30,82 @@ function getPersona(mailbox) {
   return MAILBOX_PERSONAS[mailbox] || { fullName: 'Creative Copyz Team', title: 'Account Manager' };
 }
 
+async function tagContact(contactId, tag) {
+  const CRM_API = 'https://services.leadconnectorhq.com';
+  const CRM_API_KEY = process.env.CRM_API_KEY;
+
+  const res = await fetch(`${CRM_API}/contacts/${contactId}/tags`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${CRM_API_KEY}`,
+      Version: '2021-04-15',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ tags: [tag] }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`CRM tag failed (${res.status}): ${text}`);
+  }
+}
+
+async function moveToDemoTested(enrollment) {
+  const CRM_API = 'https://services.leadconnectorhq.com';
+  const CRM_API_KEY = process.env.CRM_API_KEY;
+  const LOCATION_ID = process.env.CRM_LOCATION_ID || 'dImqkGzlWhmVksSXL1WY';
+
+  // AI Voice Receptionist Conversions pipeline
+  const PIPELINE_ID = 'Sv3XlTtCmzbGrHrZ3BFL';
+
+  // Demo Tested stage
+  const STAGE_DEMO_TESTED = '1a42d192-dc15-4dd0-bd68-f7fef2842dd0';
+
+  const searchRes = await fetch(
+    `${CRM_API}/opportunities/search?location_id=${LOCATION_ID}&contact_id=${encodeURIComponent(enrollment.contact_id)}&pipeline_id=${PIPELINE_ID}`,
+    {
+      headers: {
+        Authorization: `Bearer ${CRM_API_KEY}`,
+        Version: '2021-07-28',
+      },
+    }
+  );
+
+  if (!searchRes.ok) {
+    const text = await searchRes.text();
+    throw new Error(`CRM opportunity search failed (${searchRes.status}): ${text}`);
+  }
+
+  const searchData = await searchRes.json();
+  const opps = searchData.opportunities || [];
+
+  if (!opps.length) {
+    throw new Error(`No Conversions opportunity found for contact ${enrollment.contact_id}`);
+  }
+
+  const opportunity = opps[0];
+
+  const updateRes = await fetch(
+    `${CRM_API}/opportunities/${opportunity.id}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${CRM_API_KEY}`,
+        Version: '2021-07-28',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        pipelineStageId: STAGE_DEMO_TESTED,
+      }),
+    }
+  );
+
+  if (!updateRes.ok) {
+    const text = await updateRes.text();
+    throw new Error(`CRM stage update failed (${updateRes.status}): ${text}`);
+  }
+}
+
 // ─── Drip gap ──────────────────────────────────────────────────
 const DRIP_DELAY_MS = 3 * 60 * 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -149,6 +225,9 @@ async function processPendingUltraWarm() {
   );
 
   for (const enrollment of rows) {
+    console.log(
+  `[ultra_warm] processing 10-minute check → ${enrollment.prospect_email}`
+);
     const client = await pool.connect();
 
     try {
@@ -184,23 +263,55 @@ async function processPendingUltraWarm() {
 
       // 10 minutes elapsed and status is still active:
       // transition to ultra-warm and make step 0 immediately due.
-      await client.query(
-        `UPDATE enrollments
-            SET phase                  = 'ultra_warm',
-                step                   = 0,
-                next_send_at           = NOW(),
-                ultra_warm_pending_at  = NULL
-          WHERE id = $1`,
-        [fresh.id]
-      );
-
       await client.query('COMMIT');
 
-      console.log(
-        `[ultra_warm] ⏱️ 10-minute wait complete → ${enrollment.prospect_email}`
-      );
+console.log(
+  `[ultra_warm] ⏱️ 10-minute wait complete → ${enrollment.prospect_email}`
+);
 
-      await runSendLoop(true);
+try {
+  // 1. Tag contact as tested
+  await tagContact(
+    enrollment.contact_id,
+    'aivoice_agent_tested'
+  );
+
+  console.log(
+    `[CRM] ✅ aivoice_agent_tested tag applied → ${enrollment.prospect_email}`
+  );
+
+  // 2. Move opportunity to Demo Tested
+  await moveToDemoTested(enrollment);
+
+  console.log(
+    `[CRM] ✅ opportunity moved to Demo Tested → ${enrollment.prospect_email}`
+  );
+
+  // 3. Only AFTER CRM succeeds, enter ultra-warm
+  await pool.query(
+    `UPDATE enrollments
+        SET phase = 'ultra_warm',
+            step = 0,
+            next_send_at = NOW()
+      WHERE id = $1
+        AND phase = 'warm'
+        AND status = 'active'`,
+    [enrollment.id]
+  );
+
+  console.log(
+    `[ultra_warm] → phase changed to ultra_warm → ${enrollment.prospect_email}`
+  );
+
+  // 4. Immediately process the first ultra-warm email
+  await runSendLoop(true);
+
+} catch (crmErr) {
+  console.error(
+    `[CRM] ❌ Demo Tested update failed for ${enrollment.prospect_email}:`,
+    crmErr.message
+  );
+}
 
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (_) {}
