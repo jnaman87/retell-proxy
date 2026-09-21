@@ -20,7 +20,6 @@ const path     = require('path');
 const fs       = require('fs');
 const { google } = require('googleapis');
 const db       = require('./db');
-const pool = require('./cold-email/pool');
 // ── Cold email ───────────────────────────────────────────────────────────────
 const { runSendLoop }           = require('./cold-email/sendLoop');
 const { detectRepliesAndBounces } = require('./cold-email/replyDetector');
