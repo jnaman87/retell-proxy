@@ -26,6 +26,7 @@ const { runSendLoop }           = require('./cold-email/sendLoop');
 const { detectRepliesAndBounces } = require('./cold-email/replyDetector');
 const emailPool       = require('./cold-email/pool');
 const resolveTimezone = require('./routes/enroll').resolveTimezone; // see below
+const pool = require('./pool');
 
 
 const app  = express();
@@ -2075,6 +2076,62 @@ app.post('/gmail-webhook', express.json(), async (req, res) => {
   } catch (e) {
     _detectInProgress = false;
     console.error('[webhook] error:', e.message);
+  }
+});
+
+app.post('/ghl-conversion-webhook', async (req, res) => {
+  try {
+    const {
+      contactId,
+      opportunityId
+    } = req.body || {};
+
+    if (!contactId || !opportunityId) {
+      return res.status(400).json({
+        success: false,
+        error: 'contactId and opportunityId are required'
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE enrollments
+       SET conversions_opp_id = $1
+       WHERE contact_id = $2
+       RETURNING id, contact_id, prospect_email, conversions_opp_id`,
+      [opportunityId, contactId]
+    );
+
+    if (!result.rows.length) {
+      console.error(
+        `[ghl-webhook] No enrollment found for contact ${contactId}`
+      );
+
+      return res.status(404).json({
+        success: false,
+        error: 'Enrollment not found'
+      });
+    }
+
+    console.log(
+      `[ghl-webhook] Conversions opportunity registered: ${opportunityId} -> ${contactId}`
+    );
+
+    return res.status(200).json({
+      success: true,
+      opportunityId,
+      contactId,
+      enrollmentId: result.rows[0].id
+    });
+  } catch (err) {
+    console.error(
+      '[ghl-webhook] error:',
+      err.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
   }
 });
 
