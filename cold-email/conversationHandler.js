@@ -238,7 +238,8 @@ function replySystemPrompt(enrollment, persona) {
 '- A neutral reply MUST NOT create a demo.',
 '- A negative reply MUST NOT create a demo or send any further email.',
     '- warm phase: focus on getting the prospect to try/test the personalised demo already shared. Do NOT push for an onboarding call merely because they ask questions.',
-    '- ultra_warm phase: if the prospect wants to move forward, talk, book, or asks for next steps, set sendCalLink to true and include this link naturally: ' + CALENDAR_LINK,
+    '- ultra_warm phase: if the prospect wants to move forward, talk, schedule, or asks for next steps, set sendCalLink to true.',
+'- ultra_warm phase: if conv_status is calendar_sent, do NOT set sendCalLink to true unless the prospect explicitly asks for the calendar link again.',
     '- Whenever a call is mentioned, it must be framed as a call with Naman, never as a call with you/the email persona.',
     '- Do not repeat the calendar link if they already have it unless they ask',
     '- cold phase, neutral reply: answer the prospect’s question clearly, then end by asking for explicit permission to send a tailored AI Voice Receptionist demo link for their business.',
@@ -475,6 +476,14 @@ async function handleConversationalReply(enrollment, msg) {
       msgId: msg.id
     }
   ];
+  if (
+  enrollment.phase === 'ultra_warm' &&
+  enrollment.conv_status === 'calendar_sent'
+) {
+  console.log(
+    `[conv] ${enrollment.prospect_email} already received calendar link -- conversational reply only`
+  );
+}
 
   let aiResult;
 
@@ -585,6 +594,12 @@ if (classification === 'negative') {
   // Application owns the greeting and signature.
   // Strip anything GPT may have generated first.
   let replyText = stripAiSignoff(aiResult.reply);
+  if (enrollment.phase === 'ultra_warm' && aiResult.sendCalLink) {
+  replyText =
+    `Absolutely! Let's schedule an onboarding call with Naman. ` +
+    `You can choose a convenient time here: ${CALENDAR_LINK}. ` +
+    `Looking forward to helping you get started!`;
+}
   replyText = stripAiGreeting(replyText);
 
   // If the demo was successfully created, completely override the AI
