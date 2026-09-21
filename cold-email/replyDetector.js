@@ -116,7 +116,7 @@ async function findOpportunity(contactId, pipelineId) {
     });
 
     const r = await fetch(
-      `${CRM_API}/opportunities/search?${params.toString()}`,
+      `${CRM_API}/v3/opportunities/search?${params.toString()}`,
       {
         method: 'GET',
         headers: {
