@@ -1690,7 +1690,7 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
 
     console.log(`[retell-tools/book-appointment] ✅ Booked — id: ${data.id || data.appointmentId}`);
     // Stop cold email sequence if this email is enrolled
-    emailPool.query(
+    pool.query(
   `UPDATE enrollments
       SET status = 'completed',
           ultra_warm_pending_at = NULL
@@ -2008,7 +2008,7 @@ if (!crmCompanyName && contactId) {
       });
     }
 
-    const { rows: activeEnrollments } = await emailPool.query(
+    const { rows: activeEnrollments } = await pool.query(
       `SELECT id, prospect_email, company_name
        FROM enrollments
        WHERE status = 'active'
@@ -2033,7 +2033,7 @@ if (!crmCompanyName && contactId) {
       });
     }
 
-    const result = await emailPool.query(
+    const result = await pool.query(
       `UPDATE enrollments
        SET status = 'completed',
            ultra_warm_pending_at = NULL
@@ -2091,7 +2091,7 @@ app.post('/ghl-conversion-webhook', async (req, res) => {
       });
     }
 
-    const result = await emailpool.query(
+    const result = await pool.query(
       `UPDATE enrollments
        SET conversions_opp_id = $1
        WHERE contact_id = $2
@@ -2166,7 +2166,7 @@ app.post('/webhook/retell-call-ended', async (req, res) => {
       return;
     }
 
-    const { rows: eRows } = await emailPool.query(
+    const { rows: eRows } = await pool.query(
   'SELECT phase, status FROM enrollments WHERE contact_id = $1 LIMIT 1',
   [demo.contact_id]
 );
@@ -2255,7 +2255,7 @@ setTimeout(sweepExpired, 30_000);
 // ─────────────────────────────────────────────────────────────────────────
 
 async function transitionToWarm(contactId) {
-  const client = await emailPool.connect();
+  const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
@@ -2307,7 +2307,7 @@ async function transitionToWarm(contactId) {
 }
 
 async function transitionToUltraWarm(contactId) {
-  const client = await emailPool.connect();
+  const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
@@ -2383,7 +2383,7 @@ async function transitionToUltraWarm(contactId) {
   }
 }
 async function scheduleUltraWarm(contactId) {
-  const { rows } = await emailPool.query(
+  const { rows } = await pool.query(
     `UPDATE enrollments
         SET ultra_warm_pending_at = NOW() + INTERVAL '10 minutes'
       WHERE contact_id = $1
@@ -2425,7 +2425,7 @@ async function markDemoTested(contactId) {
     .catch(e => console.error('[ultra_warm] Tag error:', e.message));
 
   // 2. Get Conversions opp ID from DB
-  const { rows: oppRows } = await emailPool.query(
+  const { rows: oppRows } = await pool.query(
     'SELECT conversions_opp_id FROM enrollments WHERE contact_id = $1 LIMIT 1',
     [contactId]
   );
