@@ -9,8 +9,8 @@ const {
   moveOpportunity,
   createConversionOpportunity,
   OT_PIPELINE,
-  OT_UNSUBSCRIBED,
-} = require('./replyDetector');
+  OT_UNSUBSCRIBED
+} = require('./crmHelpers');
 
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const CALENDAR_LINK = 'https://api.leadconnectorhq.com/widget/bookings/aivoice-onboarding';
