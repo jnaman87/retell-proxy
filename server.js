@@ -25,7 +25,6 @@ const { runSendLoop }           = require('./cold-email/sendLoop');
 const { detectRepliesAndBounces } = require('./cold-email/replyDetector');
 const emailPool       = require('./cold-email/pool');
 const resolveTimezone = require('./routes/enroll').resolveTimezone; // see below
-const pool = require('./pool');
 
 
 const app  = express();
@@ -2092,7 +2091,7 @@ app.post('/ghl-conversion-webhook', async (req, res) => {
       });
     }
 
-    const result = await pool.query(
+    const result = await emailpool.query(
       `UPDATE enrollments
        SET conversions_opp_id = $1
        WHERE contact_id = $2
