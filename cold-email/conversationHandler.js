@@ -4,6 +4,14 @@ const pool = require('./pool');
 const { sendEmail } = require('./gmail-sender');
 const { buildDemoForEnrollment } = require('./demoBuilder');
 
+const {
+  findOpportunity,
+  moveOpportunity,
+  createConversionOpportunity,
+  OT_PIPELINE,
+  OT_UNSUBSCRIBED,
+} = require('./replyDetector');
+
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const CALENDAR_LINK = 'https://api.leadconnectorhq.com/widget/bookings/aivoice-onboarding';
 const FOLLOWUP_DAYS = 2;
@@ -12,7 +20,6 @@ const FOLLOWUP_DAYS = 2;
 // Kept local to avoid a circular dependency with replyDetector.js.
 const CRM_API = 'https://services.leadconnectorhq.com';
 const CRM_API_KEY = process.env.CRM_API_KEY;
-const OT_PIPELINE = 'NxoKeydZvDnkQEM8u6sy';
 const OT_DEMO_SENT = 'aed1858d-3090-43da-bf3c-3e398795d4da';
 
 async function tagContact(contactId, tag) {
@@ -454,12 +461,7 @@ function classifyProspectReply(text) {
 
 // Main: handle an incoming reply conversationally
 async function handleConversationalReply(enrollment, msg) {
-    const {
-    findOpportunity,
-    moveOpportunity,
-    createConversionOpportunity,
-  } = require('./replyDetector');
-  
+
   const persona = getPersona(enrollment.mailbox);
 
   const history = Array.isArray(enrollment.conversation_history)
@@ -506,12 +508,6 @@ async function handleConversationalReply(enrollment, msg) {
     );
 
     const parsed = await callOpenAI(messages);
-
-    const rawIncoming =
-      'Subject: ' +
-      (msg.subject || '') +
-      '\n' +
-      (msg.snippet || '');
 
 const validClassifications = ['positive', 'neutral', 'negative'];
 
@@ -791,6 +787,39 @@ if (classification === 'negative') {
   }
 }
 
+async function moveOpportunityToUnsubscribed(contactId) {
+  if (!contactId) {
+    return false;
+  }
+
+  try {
+    const opportunity = await findOpportunity(
+      contactId,
+      OT_PIPELINE
+    );
+
+    if (!opportunity) {
+      console.warn(
+        '[conv] no outbound opportunity found for ' + contactId
+      );
+      return false;
+    }
+
+    await moveOpportunity(
+      opportunity.id,
+      OT_UNSUBSCRIBED
+    );
+
+    return true;
+  } catch (e) {
+    console.error(
+      '[conv] opportunity stage error:',
+      e.message
+    );
+    return false;
+  }
+}
+
 async function handleNegativeReply(enrollment, msg, text) {
   const t = String(text || '').toLowerCase();
 
@@ -862,86 +891,6 @@ async function setContactDnd(contactId) {
   }
 }
 
-async function moveOpportunityToUnsubscribed(contactId) {
-  if (!contactId || !CRM_API_KEY) {
-    return false;
-  }
-
-  try {
-    const r = await fetch(
-      CRM_API + '/opportunities/search',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer ' + CRM_API_KEY,
-          Version: '2021-04-15',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          locationId: process.env.GHL_LOCATION_ID,
-          contactId: contactId,
-          pipelineName: 'AI Voice Receptionist Outbound Tracking'
-        })
-      }
-    );
-
-    if (!r.ok) {
-      console.error(
-        '[conv] opportunity search failed (' + r.status + '):',
-        await r.text()
-      );
-      return false;
-    }
-
-    const data = await r.json();
-
-    const opportunity =
-      data.opportunities &&
-      data.opportunities[0];
-
-    if (!opportunity || !opportunity.id) {
-      console.warn(
-        '[conv] no outbound opportunity found for ' +
-        contactId
-      );
-      return false;
-    }
-
-    const stageResponse = await fetch(
-      CRM_API + '/opportunities/' +
-        encodeURIComponent(opportunity.id),
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: 'Bearer ' + CRM_API_KEY,
-          Version: '2021-04-15',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          pipelineStageId: process.env.GHL_UNSUBSCRIBED_STAGE_ID
-        })
-      }
-    );
-
-    if (!stageResponse.ok) {
-      console.error(
-        '[conv] opportunity stage update failed (' +
-          stageResponse.status +
-          '):',
-        await stageResponse.text()
-      );
-      return false;
-    }
-
-    return true;
-  } catch (e) {
-    console.error(
-      '[conv] opportunity stage error:',
-      e.message
-    );
-    return false;
-  }
-}
 
 // Periodic: send follow-up when no reply after calendar link sent
 async function sendConvFollowUp(enrollment) {
