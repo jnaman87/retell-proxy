@@ -489,4 +489,9 @@ module.exports = {
   moveOpportunity,
   createConversionOpportunity,
   tagContact,
+  OT_PIPELINE,
+  OT_UNSUBSCRIBED,
+  CV_PIPELINE,
+  CV_UNSUBSCRIBED,
+  CV_REPLY_RECEIVED,
 };
