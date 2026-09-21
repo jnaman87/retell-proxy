@@ -108,43 +108,59 @@ async function enableDND(contactId, channels) {
 }
 
 async function findOpportunity(contactId, pipelineId) {
+  if (!CRM_API_KEY) {
+    console.error('[detect] opportunity search skipped: missing CRM_API_KEY');
+    return null;
+  }
+
+  if (!LOCATION_ID) {
+    console.error('[detect] opportunity search skipped: missing CRM_LOCATION_ID');
+    return null;
+  }
+
   try {
     const params = new URLSearchParams({
       locationId: LOCATION_ID,
-      contactId,
-      pipelineId,
+      contactId: contactId,
+      pipelineId: pipelineId,
+      status: 'all',
+      limit: '20',
+      page: '1',
     });
 
     const r = await fetch(
-      `${CRM_API}/v3/opportunities/search?${params.toString()}`,
+      `${CRM_API}/opportunities/search?${params.toString()}`,
       {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${CRM_API_KEY}`,
-          Version: '2021-07-28',
-          'Content-Type': 'application/json',
+          Version: '2021-04-15',
+          Accept: 'application/json',
         },
       }
     );
 
-    const rtext = await r.text();
-
-    let d = {};
-    try {
-      if (rtext) d = JSON.parse(rtext);
-    } catch {}
+    const responseText = await r.text();
 
     if (!r.ok) {
       console.error(
-        `[detect] opportunity search failed (${r.status}): ${rtext}`
+        `[detect] opportunity search failed (${r.status}):`,
+        responseText
       );
       return null;
     }
 
-    return (d.opportunities && d.opportunities[0]) || null;
+    let data = {};
+    try {
+      data = responseText ? JSON.parse(responseText) : {};
+    } catch (e) {
+      console.error('[detect] opportunity search returned invalid JSON');
+      return null;
+    }
 
+    return data.opportunities?.[0] || null;
   } catch (e) {
-    console.error('[detect] opp search error:', e.message);
+    console.error('[detect] opportunity search error:', e.message);
     return null;
   }
 }
