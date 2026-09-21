@@ -21,9 +21,9 @@ const fs       = require('fs');
 const { google } = require('googleapis');
 const db       = require('./db');
 // ── Cold email ───────────────────────────────────────────────────────────────
-const { runSendLoop }           = require('./cold-email/sendLoop');
+const { runSendLoop } = require('./cold-email/sendLoop');
 const { detectRepliesAndBounces } = require('./cold-email/replyDetector');
-const emailPool       = require('./cold-email/pool');
+const pool = require('./cold-email/pool');
 const resolveTimezone = require('./routes/enroll').resolveTimezone; // see below
 
 
