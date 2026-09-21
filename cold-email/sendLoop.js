@@ -214,15 +214,15 @@ async function finaliseNoReply(enrollment) {
 
 async function processPendingUltraWarm() {
   const { rows } = await pool.query(
-    `SELECT id, prospect_email
-       FROM enrollments
-      WHERE phase = 'warm'
-        AND status = 'active'
-        AND ultra_warm_pending_at IS NOT NULL
-        AND ultra_warm_pending_at <= NOW()
-      ORDER BY ultra_warm_pending_at
-      LIMIT 10`
-  );
+  `SELECT id, prospect_email, contact_id
+     FROM enrollments
+    WHERE phase = 'warm'
+      AND status = 'active'
+      AND ultra_warm_pending_at IS NOT NULL
+      AND ultra_warm_pending_at <= NOW()
+    ORDER BY ultra_warm_pending_at
+    LIMIT 10`
+);
 
   for (const enrollment of rows) {
     console.log(
@@ -270,6 +270,16 @@ console.log(
 );
 
 try {
+  if (!enrollment.contact_id) {
+    throw new Error(
+      `Missing CRM contact_id for ${enrollment.prospect_email}`
+    );
+  }
+
+  console.log(
+    `[CRM] Demo Tested update → ${enrollment.prospect_email} | contact_id=${enrollment.contact_id}`
+  );
+
   // 1. Tag contact as tested
   await tagContact(
     enrollment.contact_id,
