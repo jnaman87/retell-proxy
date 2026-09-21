@@ -7,7 +7,6 @@ const { buildDemoForEnrollment } = require('./demoBuilder');
 const {
   findOpportunity,
   moveOpportunity,
-  createConversionOpportunity,
   OT_PIPELINE,
   OT_UNSUBSCRIBED
 } = require('./crmHelpers');
@@ -709,12 +708,6 @@ if (classification === 'negative') {
       `[conv] No outbound opportunity found for ${contactId} when demo was sent`
     );
   }
-
-  // Pipeline II → create new opportunity at Demo Sent
-  await createConversionOpportunity(
-    contactId,
-    enrollment.company_name
-  );
 }
 
   const finalHistory = [
