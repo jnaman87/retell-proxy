@@ -685,4 +685,8 @@ ${persona.title} | Creative Copyz</p>`,
   },
 ];
 
-module.exports = { ultra_warm };
+module.exports = {
+  cold,
+  warm,
+  ultra_warm,
+};
