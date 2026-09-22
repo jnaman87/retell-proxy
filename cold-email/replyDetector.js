@@ -18,7 +18,6 @@ const {
   CV_DEMO_TESTED,
   CV_DEMO_EXPIRED,
   CV_UNSUBSCRIBED,
-  CV_REPLY_RECEIVED,
   CV_CALL_BOOKED,
   CV_NO_SHOW,
   CV_CLOSED_WON
@@ -187,9 +186,7 @@ async function handlePositive(enrollment, msg) {
 }
 
 // Handle negative/unsubscribe (all phases)
-async function handleNegative(enrollment, msg, isUnsub) {
-  const { contact_id, prospect_email, phase } = enrollment;
-  await pool.query(`UPDATE enrollments SET status = 'unsubscribed' WHERE id = $1`, [enrollment.id]);
+await pool.query(`UPDATE enrollments SET status = 'unsubscribed' WHERE id = $1`, [enrollment.id]);
   await tagContact(contact_id, 'aivoice_reply_negative');
   await enableDND(contact_id, 'all');
   await addNote(contact_id,
@@ -202,7 +199,6 @@ async function handleNegative(enrollment, msg, isUnsub) {
     if (cvOpp) await moveOpportunity(cvOpp.id, CV_UNSUBSCRIBED);
   }
   console.log(`[detect] ${prospect_email} -> ${isUnsub ? 'unsubscribed' : 'not interested'} (phase: ${phase})`);
-}
 // Main detection loop
 async function detectRepliesAndBounces() {
   console.log('[detect] running reply/bounce detection...');
@@ -217,9 +213,11 @@ async function detectRepliesAndBounces() {
           // Bounce detection
           if (msg.bounced) {
             const result = await pool.query(
-              `UPDATE enrollments SET status = 'bounced'
-               WHERE thread_id = $1 AND status NOT IN ('unsubscribed', 'bounced', 'completed')
-               RETURNING contact_id, prospect_email`,
+              `UPDATE enrollments
+ SET status = 'bounced'
+ WHERE thread_id = $1
+   AND status NOT IN ('unsubscribed', 'bounced', 'completed', 'booked')
+ RETURNING contact_id, prospect_email`
               [msg.threadId]
             );
             if (result.rows.length > 0) {
@@ -239,9 +237,9 @@ async function detectRepliesAndBounces() {
           // Find enrollment -- includes 'replied' so ongoing conversations keep working
           const { rows: enr } = await pool.query(
             `SELECT * FROM enrollments
-             WHERE thread_id = $1
-               AND status NOT IN ('unsubscribed', 'bounced', 'completed')
-             LIMIT 1`,
+ WHERE thread_id = $1
+   AND status NOT IN ('unsubscribed', 'bounced', 'completed', 'booked')
+ LIMIT 1`,
             [msg.threadId]
           );
           if (!enr.length) continue;
@@ -286,21 +284,6 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
             if (intent === 'negative' || intent === 'unsubscribe') {
   await handleNegative(enrollment, msg, intent === 'unsubscribe');
 } else {
-  const cvOpp = await findOpportunity(
-    enrollment.contact_id,
-    CV_PIPELINE
-  );
-
-  if (cvOpp) {
-    await moveOpportunity(
-      cvOpp.id,
-      CV_REPLY_RECEIVED
-    );
-  } else {
-    console.error(
-      `[detect] No Conversions opportunity found for ${enrollment.contact_id} on reply`
-    );
-  }
 
   await handleConversationalReply(enrollment, msg);
 }
@@ -359,6 +342,5 @@ module.exports = {
   OT_UNSUBSCRIBED,
 
   CV_PIPELINE,
-  CV_UNSUBSCRIBED,
-  CV_REPLY_RECEIVED
+  CV_UNSUBSCRIBED
 };
