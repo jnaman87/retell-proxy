@@ -9,6 +9,7 @@ const LOCATION_ID =
 
 // Outbound pipeline
 const OT_PIPELINE = 'NxoKeydZvDnkQEM8u6sy';
+const OT_BOUNCED = '5d0a6be7-0dff-4bf2-91c3-a8ecc270bda0';
 const OT_REPLY_RECEIVED = 'ad4c1fd7-e0bf-4101-9e1e-3e04a7ec81e2';
 const OT_UNSUBSCRIBED = '8c9f1603-53f3-4917-97b0-4a89e6507ce6';
 const OT_NO_REPLIES = 'cc480a05-61e8-482b-b0c2-430986b64826';
