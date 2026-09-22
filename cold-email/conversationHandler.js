@@ -731,9 +731,7 @@ if (classification === 'negative') {
     ? 'warm'
     : enrollment.phase;
 
-  const nextStatus = demoWasSent
-    ? 'active'
-    : 'replied';
+  const nextStatus = 'active';
 
   await pool.query(
     'UPDATE enrollments SET status = $1, phase = $2, ' +
