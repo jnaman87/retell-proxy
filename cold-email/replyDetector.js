@@ -186,19 +186,34 @@ async function handlePositive(enrollment, msg) {
 }
 
 // Handle negative/unsubscribe (all phases)
-await pool.query(`UPDATE enrollments SET status = 'unsubscribed' WHERE id = $1`, [enrollment.id]);
+async function handleNegative(enrollment, msg, isUnsub) {
+  const { contact_id, prospect_email, phase } = enrollment;
+
+  await pool.query(
+    `UPDATE enrollments SET status = 'unsubscribed' WHERE id = $1`,
+    [enrollment.id]
+  );
+
   await tagContact(contact_id, 'aivoice_reply_negative');
   await enableDND(contact_id, 'all');
-  await addNote(contact_id,
-    `${isUnsub ? 'Unsubscribed' : 'Not interested'} reply to ${phase} email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply preview:\n${msg.snippet}`);
+
+  await addNote(
+    contact_id,
+    `${isUnsub ? 'Unsubscribed' : 'Not interested'} reply to ${phase} email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply preview:\n${msg.snippet}`
+  );
+
   if (phase === 'cold') {
     const opp = await findOpportunity(contact_id, OT_PIPELINE);
-    if (opp) await moveOpportunity(opp.id, OT_UNSUBSCRIBED);
-  } else {
-    const cvOpp = await findOpportunity(contact_id, CV_PIPELINE);
-    if (cvOpp) await moveOpportunity(cvOpp.id, CV_UNSUBSCRIBED);
+
+    if (opp) {
+      await moveOpportunity(opp.id, OT_UNSUBSCRIBED);
+    }
   }
-  console.log(`[detect] ${prospect_email} -> ${isUnsub ? 'unsubscribed' : 'not interested'} (phase: ${phase})`);
+
+  console.log(
+    `[detect] ${prospect_email} -> ${isUnsub ? 'unsubscribed' : 'not interested'} (phase: ${phase})`
+  );
+}
 // Main detection loop
 async function detectRepliesAndBounces() {
   console.log('[detect] running reply/bounce detection...');
@@ -217,7 +232,7 @@ async function detectRepliesAndBounces() {
  SET status = 'bounced'
  WHERE thread_id = $1
    AND status NOT IN ('unsubscribed', 'bounced', 'completed', 'booked')
- RETURNING contact_id, prospect_email`
+ RETURNING contact_id, prospect_email`,
               [msg.threadId]
             );
             if (result.rows.length > 0) {
