@@ -236,16 +236,40 @@ async function detectRepliesAndBounces() {
               [msg.threadId]
             );
             if (result.rows.length > 0) {
-              const { contact_id, prospect_email } = result.rows[0];
-              console.log(`[detect] bounce for ${prospect_email}`);
-              if (contact_id) {
-                await Promise.all([
-                  tagContact(contact_id, 'aivoice_bounced'),
-                  enableDND(contact_id, ['Email']),
-                  addNote(contact_id, `Cold email bounced.\nSending mailbox: ${email}\nProspect: ${prospect_email}\n\nEmail DND enabled.`),
-                ]);
-              }
-            }
+  const { contact_id, prospect_email } = result.rows[0];
+
+  console.log(`[detect] bounce for ${prospect_email}`);
+
+  if (contact_id) {
+    await Promise.all([
+      tagContact(contact_id, 'aivoice_bounced'),
+      enableDND(contact_id, ['Email']),
+      addNote(
+        contact_id,
+        `Cold email bounced.
+Sending mailbox: ${email}
+Prospect: ${prospect_email}
+
+Email DND enabled.`
+      ),
+    ]);
+
+    // Move the Outbound Tracking opportunity to Bounced
+    const otOpp = await findOpportunity(contact_id, OT_PIPELINE);
+
+    if (otOpp) {
+      await moveOpportunity(otOpp.id, OT_BOUNCED);
+
+      console.log(
+        `[detect] ${prospect_email} -> Outbound Tracking: Bounced`
+      );
+    } else {
+      console.error(
+        `[detect] No outbound opportunity found for ${contact_id} on bounce`
+      );
+    }
+  }
+}
             continue;
           }
 
