@@ -249,7 +249,7 @@ async function detectRepliesAndBounces() {
             continue;
           }
 
-          // Find enrollment -- includes 'replied' so ongoing conversations keep working
+          // Find active enrollment so ongoing conversations keep working
           const { rows: enr } = await pool.query(
             `SELECT * FROM enrollments
  WHERE thread_id = $1
