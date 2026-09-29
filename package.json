@@ -7,7 +7,8 @@
   "build:retell-web-client": "esbuild client/retell-web-client.js --bundle --format=iife --platform=browser --outfile=public/retell-web-client.js",
   "postinstall": "npm run build:retell-web-client",
   "start": "node server.js",
-  "dev": "nodemon server.js"
+  "dev": "nodemon server.js",
+    "backfill:enrollment-fields": "node backfill-enrollment-fields.js"
 },
   "engines": {
     "node": ">=18"
