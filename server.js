@@ -860,38 +860,102 @@ function computePalette(primaryHex, secondaryHex) {
 
 app.post('/enroll', express.json(), async (req, res) => {
   try {
-    const b   = req.body || {};
+    const incoming = Array.isArray(req.body)
+      ? (req.body[0] || {})
+      : (req.body || {});
+
+    // Supports both a direct GHL payload and an n8n-wrapped payload.
+    const b = incoming.body && typeof incoming.body === 'object'
+      ? incoming.body
+      : incoming;
+
     const raw = { ...b, ...(b.contact || {}), ...(b.customData || {}) };
 
-    const email = raw.email || raw.Email;
-    if (!email) return res.status(400).json({ error: 'email is required' });
+    const pick = (...keys) => {
+      for (const key of keys) {
+        const value = raw[key];
+        if (value !== undefined && value !== null && String(value).trim()) {
+          return String(value).trim();
+        }
+      }
+      return '';
+    };
 
-    const firstName   = raw.firstName   || raw.first_name  || '';
-    const lastName    = raw.lastName    || raw.last_name   || '';
-    const companyName = cleanBusinessName(raw.companyName || raw.businessName || raw.business_name || '');
+    const email = pick('email', 'Email');
+    if (!email) {
+      return res.status(400).json({ error: 'email is required' });
+    }
+
+    const firstName = pick('firstName', 'first_name');
+    const lastName = pick('lastName', 'last_name');
+
+    const companyName = cleanBusinessName(
+      pick('companyName', 'businessName', 'company_name')
+    );
 
     const result = await db.enroll({
-      contactId   : raw.contactId    || raw.contact_id || raw.id,
+      contactId: pick('contactId', 'contact_id', 'id', 'Contact Id'),
       email,
-      name        : `${firstName} ${lastName}`.trim(),
-      city        : raw.city         || raw.City       || '',
-      tz          : raw.timezone     || raw.tz         || 'America/New_York',
-      niche       : raw.niche        || raw.Niche      || 'general',
+      name: `${firstName} ${lastName}`.trim(),
+      city: pick('city', 'City'),
+      tz: pick('timezone', 'tz', 'Timezone') || 'America/New_York',
+      niche: pick('niche', 'Niche', 'Primary Business Type') || 'general',
       companyName,
-      hook        : raw.personalisationHook || raw.personalisation_hook || '',
-      pain        : raw.currentPain         || raw.current_pain         || '',
-      services    : raw.coreServices        || raw.core_services        || '',
-      tagline     : raw.tagline || '',
+
+      hook: pick(
+        'personalisationHook',
+        'personalisation_hook',
+        'Personalisation Hook',
+        'Personalization Hook'
+      ),
+      pain: pick(
+        'currentPain',
+        'current_pain',
+        'Current Pain'
+      ),
+      services: pick(
+        'coreServices',
+        'core_services',
+        'Core Services'
+      ),
+      callerFaqs: pick(
+        'callerFaqs',
+        'caller_faqs',
+        'Caller FAQs'
+      ),
+      primaryColor: pick(
+        'primaryColor',
+        'primary_color',
+        'Primary Color',
+        'Brand Primary Color'
+      ),
+      secondaryColor: pick(
+        'secondaryColor',
+        'secondary_color',
+        'Secondary Color',
+        'Brand Secondary Color'
+      ),
+      tagline: pick('tagline', 'Business Tagline')
     });
 
     if (result.duplicate) {
-      console.log(`[enroll] Already enrolled: ${email} → id ${result.enrollmentId}`);
-      return res.json({ success: false, message: 'Already enrolled', enrollmentId: result.enrollmentId });
+      console.log(
+        `[enroll] Already enrolled: ${email} → id ${result.enrollmentId}`
+      );
+      return res.json({
+        success: false,
+        message: 'Already enrolled',
+        enrollmentId: result.enrollmentId
+      });
     }
 
-    console.log(`[enroll] ✅ id=${result.enrollmentId} ${email} (${companyName || 'no company'})`);
-    return res.json({ success: true, enrollmentId: result.enrollmentId });
-
+    console.log(
+      `[enroll] ✅ id=${result.enrollmentId} ${email} (${companyName || 'no company'})`
+    );
+    return res.json({
+      success: true,
+      enrollmentId: result.enrollmentId
+    });
   } catch (e) {
     console.error('[enroll] error:', e.message);
     return res.status(500).json({ error: e.message });
@@ -2385,7 +2449,8 @@ async function transitionToUltraWarm(contactId) {
 async function scheduleUltraWarm(contactId) {
   const { rows } = await pool.query(
     `UPDATE enrollments
-        SET ultra_warm_pending_at = NOW() + INTERVAL '10 minutes'
+        SET ultra_warm_pending_at = NOW() + INTERVAL '10 minutes',
+    demo_tested_at = COALESCE(demo_tested_at, NOW())
       WHERE contact_id = $1
         AND phase = 'warm'
         AND status = 'active'
