@@ -529,6 +529,14 @@ if (classification === 'negative') {
 
   return;
 }
+if (classification === 'positive') {
+  await pool.query(
+    `UPDATE enrollments
+        SET positive_reply_at = COALESCE(positive_reply_at, NOW())
+      WHERE id = $1`,
+    [enrollment.id]
+  );
+}
 
     const guardedBuildDemo =
   enrollment.phase === 'cold' &&
