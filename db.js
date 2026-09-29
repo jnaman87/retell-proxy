@@ -76,6 +76,15 @@ async function init(attempt = 1) {
   `ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS ultra_warm_pending_at TIMESTAMPTZ`
 ).catch(e => console.warn('[db] ultra_warm_pending_at migration skipped:', e.message));
   console.log('[db] schema ready');
+  await pool.query(
+  `ALTER TABLE enrollments
+   ADD COLUMN IF NOT EXISTS positive_reply_at TIMESTAMPTZ`
+).catch(e => console.warn('[db] positive_reply_at migration skipped:', e.message));
+
+await pool.query(
+  `ALTER TABLE enrollments
+   ADD COLUMN IF NOT EXISTS demo_tested_at TIMESTAMPTZ`
+).catch(e => console.warn('[db] demo_tested_at migration skipped:', e.message));
 
 }
 
@@ -206,24 +215,89 @@ module.exports = {
 };
 
 
-async function enroll({ contactId, email, name, city, tz, niche, companyName, hook, pain, services, tagline }) {
-  // Dedup check
+async function enroll({
+  contactId,
+  email,
+  name,
+  city,
+  tz,
+  niche,
+  companyName,
+  hook,
+  pain,
+  services,
+  tagline,
+  callerFaqs,
+  primaryColor,
+  secondaryColor
+}) {
   const existing = await pool.query(
-    "SELECT id FROM enrollments WHERE prospect_email=$1 AND status NOT IN ('completed','unsubscribed','bounced')",
+    `SELECT id
+       FROM enrollments
+      WHERE prospect_email = $1
+        AND status NOT IN ('completed', 'unsubscribed', 'bounced')`,
     [email]
   );
+
   if (existing.rows.length > 0) {
-    return { duplicate: true, enrollmentId: existing.rows[0].id };
+    return {
+      duplicate: true,
+      enrollmentId: existing.rows[0].id
+    };
   }
-  // Insert
+
   const result = await pool.query(
     `INSERT INTO enrollments
-     (contact_id, prospect_email, prospect_name, prospect_city, prospect_tz,
-      niche, company_name, personalisation_hook, current_pain, core_services, tagline,
-      phase, step, status, next_send_at, enrolled_at, conversation_history)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'cold',0,'active',NOW(),NOW(),'[]'::jsonb)
+      (
+        contact_id,
+        prospect_email,
+        prospect_name,
+        prospect_city,
+        prospect_tz,
+        niche,
+        company_name,
+        personalisation_hook,
+        current_pain,
+        core_services,
+        tagline,
+        caller_faqs,
+        primary_color,
+        secondary_color,
+        phase,
+        step,
+        status,
+        next_send_at,
+        enrolled_at,
+        conversation_history
+      )
+     VALUES
+      (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, $9, $10,
+        $11, $12, $13, $14,
+        'cold', 0, 'active', NOW(), NOW(), '[]'::jsonb
+      )
      RETURNING id`,
-    [contactId, email, name, city, tz, niche, companyName, hook, pain, services, tagline]
+    [
+      contactId,
+      email,
+      name,
+      city,
+      tz,
+      niche,
+      companyName,
+      hook,
+      pain,
+      services,
+      tagline,
+      callerFaqs,
+      primaryColor,
+      secondaryColor
+    ]
   );
-  return { duplicate: false, enrollmentId: result.rows[0].id };
+
+  return {
+    duplicate: false,
+    enrollmentId: result.rows[0].id
+  };
 }
