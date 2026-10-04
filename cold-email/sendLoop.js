@@ -357,6 +357,14 @@ async function runSendLoop(skipPendingUltraWarm = false) {
          LEFT JOIN mailboxes m ON m.email = e.mailbox
         WHERE e.status IN ('active', 'awaiting_no_reply')
           AND e.next_send_at <= NOW()
+                    AND (
+                e.status = 'awaiting_no_reply'
+             OR CASE
+                  WHEN e.prospect_tz IN (SELECT name FROM pg_timezone_names)
+                  THEN EXTRACT(HOUR FROM NOW() AT TIME ZONE e.prospect_tz) BETWEEN 8 AND 17
+                  ELSE FALSE
+                END
+          )
           AND (
                 e.status = 'awaiting_no_reply'
              OR (e.phase = 'cold' AND e.step = 0 AND EXISTS (
