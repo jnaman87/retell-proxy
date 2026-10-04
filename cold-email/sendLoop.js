@@ -463,31 +463,37 @@ async function runSendLoop(skipPendingUltraWarm = false) {
         const delayInterval = /[a-zA-Z]/.test(rawDelay) ? rawDelay : `${rawDelay} days`;
 
         const isColdDone = enrollment.phase === 'cold' && isDone;
-const newStatus = isColdDone ? 'awaiting_no_reply' : (isDone ? 'completed' : 'active');
+const newStatus = isColdDone
+  ? 'awaiting_no_reply'
+  : (isDone ? 'completed' : 'active');
 
-const newNext = isColdDone
-  ? `NOW() + '3 days'::interval`
-  : (isDone ? 'NULL' : `NOW() + $4::INTERVAL`);
+const advanceParams = [
+  nextStep,
+  mailbox,
+  newStatus
+];
 
-// IMPORTANT: claim/advance the sequence BEFORE calling Gmail, then
-// commit that claim. This makes the send path idempotent across
-// multiple processes. The old code sent first and only advanced step
-// afterward, so any concurrent process (or a post-send DB failure)
-// could send the same step again.
+let newNext;
+
+if (isColdDone) {
+  newNext = `NOW() + '3 days'::interval`;
+} else if (isDone) {
+  newNext = 'NULL';
+} else {
+  advanceParams.push(delayInterval);
+  newNext = `NOW() + $${advanceParams.length}::INTERVAL`;
+}
+
+advanceParams.push(enrollment.id);
+
 await client.query(
   `UPDATE enrollments SET
-     step            = $1,
-     mailbox         = $2,
-     next_send_at    = ${newNext},
-     status          = $3
-   WHERE id = $5`,
-  [
-    nextStep,
-    mailbox,
-    newStatus,
-    delayInterval,
-    enrollment.id
-  ]
+     step = $1,
+     mailbox = $2,
+     next_send_at = ${newNext},
+     status = $3
+   WHERE id = $${advanceParams.length}`,
+  advanceParams
 );
 
         await client.query('COMMIT');
