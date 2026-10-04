@@ -1968,7 +1968,7 @@ app.post('/delete-agent', async (req, res) => {
   let agentDeleted = false;
   let llmDeleted   = false;
   try {
-    const agentRes = await fetch(`RETELL/delete-agent/{agentId}`, {
+    const agentRes = await fetch(`${RETELL}/delete-agent/${agentId}`, {
       method  : 'DELETE',
       headers : { 'Authorization': `Bearer ${RETELL_KEY}` },
     });
@@ -1984,7 +1984,7 @@ app.post('/delete-agent', async (req, res) => {
       console.error(`[delete-agent] Agent delete failed (${agentRes.status}): ${err}`);
     }
     if (llmId) {
-      const llmRes = await fetch(`RETELL/delete-retell-llm/{llmId}`, {
+      const llmRes = await fetch(`${RETELL}/delete-retell-llm/${llmId}`, {
         method  : 'DELETE',
         headers : { 'Authorization': `Bearer ${RETELL_KEY}` },
       });
@@ -2287,7 +2287,7 @@ async function sweepExpired() {
     if (!rows.length) return;
     console.log(`[sweep] ${rows.length} expired demo(s) to tear down`);
     for (const r of rows) {
-      const aRes = await fetch(`RETELL/delete-agent/{r.agent_id}`, {
+      const aRes = await fetch(`${RETELL}/delete-agent/${r.agent_id}`, {
         method  : 'DELETE',
         headers : { Authorization: `Bearer ${RETELL_API_KEY}` },
       }).catch(e => ({ ok: false, status: 0, _err: e.message }));
@@ -2296,7 +2296,7 @@ async function sweepExpired() {
         continue;
       }
       if (r.llm_id) {
-        const lRes = await fetch(`RETELL/delete-retell-llm/{r.llm_id}`, {
+        const lRes = await fetch(`${RETELL}/delete-retell-llm/${r.llm_id}`, {
           method  : 'DELETE',
           headers : { Authorization: `Bearer ${RETELL_API_KEY}` },
         }).catch(e => ({ ok: false, status: 0, _err: e.message }));
