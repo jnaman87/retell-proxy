@@ -604,7 +604,6 @@ await pool.query(
             [mailbox]
           );
         }
-        }
 
         console.log(`[loop] ✅ step ${enrollment.step} sent to ${enrollment.prospect_email} via ${mailbox} (${enrollment.phase})`);
         console.log('[loop] waiting 3 min before next send...');
