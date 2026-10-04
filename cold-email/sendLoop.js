@@ -112,7 +112,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ─── IST date helper ───────────────────────────────────────────
 const IST_DATE_SQL = `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE`;
-
+const NEW_LEADS_PER_MAILBOX = 2;
+const FOLLOWUPS_PER_MAILBOX = 8;
 function todayIST() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
@@ -137,7 +138,7 @@ async function pickMailbox() {
   const row = await pool.query(
     `SELECT email FROM mailboxes
      WHERE daily_reset_at < ${IST_DATE_SQL}
-        OR daily_count < 10
+                OR daily_count < ${NEW_LEADS_PER_MAILBOX}
      ORDER BY last_sent_at NULLS FIRST
      LIMIT 1`
   );
@@ -350,12 +351,24 @@ async function runSendLoop(skipPendingUltraWarm = false) {
     // PostgreSQL advisory lock before it can be sent. The old loopRunning flag
     // only protected one Node process; multiple Railway processes could all
     // select the same due enrollment and send it.
-    const due = await pool.query(
-      `SELECT id
-         FROM enrollments
-        WHERE status IN ('active', 'awaiting_no_reply')
-          AND next_send_at <= NOW()
-        ORDER BY next_send_at ASC
+        const due = await pool.query(
+      `SELECT e.id
+         FROM enrollments e
+         LEFT JOIN mailboxes m ON m.email = e.mailbox
+        WHERE e.status IN ('active', 'awaiting_no_reply')
+          AND e.next_send_at <= NOW()
+          AND (
+                e.status = 'awaiting_no_reply'
+             OR (e.phase = 'cold' AND e.step = 0 AND EXISTS (
+                   SELECT 1 FROM mailboxes
+                    WHERE daily_reset_at < ${IST_DATE_SQL}
+                       OR daily_count < ${NEW_LEADS_PER_MAILBOX}))
+                          OR e.phase IN ('warm', 'ultra_warm')
+             OR (e.phase = 'cold' AND e.step > 0 AND (
+                   m.daily_reset_at < ${IST_DATE_SQL}
+                OR m.daily_followups < ${FOLLOWUPS_PER_MAILBOX}))
+          )
+        ORDER BY e.next_send_at ASC
         LIMIT 6`
     );
 
@@ -443,6 +456,24 @@ async function runSendLoop(skipPendingUltraWarm = false) {
           mailbox = enrollment.mailbox;
         }
 
+        // ── Daily follow-up cap (per mailbox) ──────────────────
+        const isNewLead = enrollment.phase === 'cold' && enrollment.step === 0;
+                if (!isNewLead && enrollment.phase === 'cold') {
+          const room = await client.query(
+            `SELECT 1 FROM mailboxes
+              WHERE email = $1
+                AND (daily_reset_at < ${IST_DATE_SQL}
+                     OR daily_followups < ${FOLLOWUPS_PER_MAILBOX})`,
+            [mailbox]
+          );
+          if (!room.rows.length) {
+            await client.query('ROLLBACK');
+            client.release();
+            console.log(`[loop] ${mailbox} hit its follow-up cap for today, holding enrollment ${enrollment.id}`);
+            continue;
+          }
+        }
+        
         const persona = getPersona(mailbox);
         const e = {
           ...enrollment,
@@ -543,21 +574,36 @@ await pool.query(
   [enrollment.id, threadId, messageId]
 );
 
-        if (enrollment.step === 0 && enrollment.phase === 'cold') {
+                if (enrollment.step === 0 && enrollment.phase === 'cold') {
           await pool.query(
             `UPDATE mailboxes SET
-               last_sent_at   = NOW(),
-               daily_count    = CASE WHEN daily_reset_at < ${IST_DATE_SQL} THEN 1
-                                     ELSE daily_count + 1 END,
-               daily_reset_at = ${IST_DATE_SQL}
+               last_sent_at    = NOW(),
+               daily_count     = CASE WHEN daily_reset_at < ${IST_DATE_SQL} THEN 1
+                                      ELSE daily_count + 1 END,
+               daily_followups = CASE WHEN daily_reset_at < ${IST_DATE_SQL} THEN 0
+                                      ELSE daily_followups END,
+               daily_reset_at  = ${IST_DATE_SQL}
              WHERE email = $1`,
             [mailbox]
           );
-        } else {
+                } else if (enrollment.phase === 'cold') {
+          await pool.query(
+            `UPDATE mailboxes SET
+               last_sent_at    = NOW(),
+               daily_followups = CASE WHEN daily_reset_at < ${IST_DATE_SQL} THEN 1
+                                      ELSE daily_followups + 1 END,
+               daily_count     = CASE WHEN daily_reset_at < ${IST_DATE_SQL} THEN 0
+                                      ELSE daily_count END,
+               daily_reset_at  = ${IST_DATE_SQL}
+             WHERE email = $1`,
+            [mailbox]
+          );
+                          } else {
           await pool.query(
             `UPDATE mailboxes SET last_sent_at = NOW() WHERE email = $1`,
             [mailbox]
           );
+        }
         }
 
         console.log(`[loop] ✅ step ${enrollment.step} sent to ${enrollment.prospect_email} via ${mailbox} (${enrollment.phase})`);
