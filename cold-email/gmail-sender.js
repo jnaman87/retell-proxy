@@ -161,7 +161,7 @@ async function listRecentInbound(mailbox, { days = 3, max = 50 } = {}) {
   internalDate : msg.internalDate ? Number(msg.internalDate) : null,
 });
     } catch (e) {
-      console.error(`[gmail] metadata read failed for ${m.id}: ${e.message}`);
+            console.error(`[gmail] metadata read failed for ${m.id} in ${mailbox}: ${e.message}`);
     }
   }
   return out;
