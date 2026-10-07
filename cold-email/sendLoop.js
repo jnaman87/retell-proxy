@@ -156,17 +156,35 @@ function isInSendWindow(ianaTimezone) {
   }
 }
 
+// ─── Niche normalisation (GHL sends free-text niche values) ────
+function normalizeNiche(niche) {
+  const n = (niche || '').toLowerCase();
+  if (n.includes('restoration') || n.includes('disaster mitigation') || n.includes('flood') || n.includes('water damage') || n.includes('fire damage') || n.includes('mold')) return 'restoration';
+  if (n.includes('bail'))                                                                return 'bailbond';
+  if (n.includes('tow'))                                                                 return 'towing';
+  if (n.includes('locksmith') || n.includes('lockout') || n.includes('lock'))            return 'locksmith';
+  if (n.includes('vet') || n.includes('animal') || n.includes('pet'))                    return 'vet';
+  if (n.includes('funeral') || n.includes('mortuary') || n.includes('cremation'))        return 'funeral';
+  if (n.includes('septic') || n.includes('sewage') || n.includes('drain'))               return 'septic';
+  if (n.includes('nemt') || n.includes('medical transport') || n.includes('non-emergency')) return 'nemt';
+  if (n.includes('security') || n.includes('guard'))                                     return 'security';
+  if (n.includes('roadside') || n.includes('breakdown') || n.includes('battery'))        return 'roadside';
+  return 'restoration';
+}
+
+// Returns the sequence for this phase, never falling back to a different phase
+function getSequence(phase, niche) {
+  if (phase === 'ultra_warm') return SEQUENCES.ultra_warm;
+  const p = SEQUENCES[phase] ? phase : 'cold';
+  return SEQUENCES[p][normalizeNiche(niche)] || SEQUENCES[p].restoration;
+}
+
 // ─── Sequence + variation resolution ───────────────────────────
 // cold[niche][step]  → { delayDays, variants: [...] } → pick a random variant
 // warm[niche][step]  → { delayDays, subject, body }
 // ultra_warm[step]   → { delayDays, subject, body }
 function resolveTemplate(phase, niche, stepIndex) {
-  let seq;
-  if (phase === 'ultra_warm') {
-    seq = SEQUENCES.ultra_warm;
-  } else {
-    seq = (SEQUENCES[phase] && SEQUENCES[phase][niche]) || SEQUENCES.cold.restoration;
-  }
+    const seq = getSequence(phase, niche);
   const step = seq[stepIndex];
   if (!step) return null;
 
@@ -494,9 +512,7 @@ async function runSendLoop(skipPendingUltraWarm = false) {
           + '\n\n---\nTo stop receiving these emails, simply reply with "unsubscribe".';
 
         const nextStep = enrollment.step + 1;
-        const seqLen = enrollment.phase === 'ultra_warm'
-          ? SEQUENCES.ultra_warm.length
-          : (SEQUENCES[enrollment.phase] && SEQUENCES[enrollment.phase][enrollment.niche] || SEQUENCES.cold.restoration).length;
+                const seqLen = getSequence(enrollment.phase, enrollment.niche).length;
         const isDone = nextStep >= seqLen;
         const rawDelay = String(template.delayDays || 3);
         const delayInterval = /[a-zA-Z]/.test(rawDelay) ? rawDelay : `${rawDelay} days`;
