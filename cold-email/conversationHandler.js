@@ -232,7 +232,7 @@ function replySystemPrompt(enrollment, persona) {
     '',
     'STRICT RULES:',
     '- NEVER use em dashes in any form',
-    '- Do not generate a greeting or salutation. The application adds the greeting.',
+        '- Do not start with a greeting, salutation, or their name. Start directly with the body.',
     '- Do not generate a sign-off, closing, sender name, job title, or company signature. The application adds the signature.',
     '- Body: 2 to 4 sentences, no filler phrases',
     'CLASSIFICATION:',
@@ -282,7 +282,7 @@ function followUpSystemPrompt(enrollment, persona) {
     '',
     'STRICT RULES:',
     '- NEVER use em dashes in any form',
-    '- Do not generate a greeting or salutation. The application adds the greeting.',
+        '- Do not start with a greeting, salutation, or their name. Start directly with the body.',
     '- Do not generate a sign-off, closing, sender name, job title, or company signature. The application adds the signature.',
     '- Body: 2 to 3 sentences maximum',
     '- Include booking link: ' + CALENDAR_LINK,
@@ -388,10 +388,11 @@ function getFirstName(name) {
 function stripAiGreeting(text) {
   return String(text || '')
     .replace(
-      /^(?:Hi|Hello|Hey|Dear)\s+[^,\n]+,?\s*/i,
+      /^(?:Hi|Hello|Hey|Dear|Good (?:morning|afternoon|evening))\b(?:[ \t]+[^,\n!]+)?[,!]?\s*/i,
       ''
     )
-    .trim();
+    .trim()
+    .replace(/^./, c => c.toUpperCase());
 }
 
 function stripAiSignoff(text) {
@@ -632,19 +633,6 @@ if (classification === 'positive') {
       )
       .replace(/\n{3,}/g, '\n\n')
       .trim();
-  }
-
-  const firstName = getFirstName(
-    enrollment.prospect_name
-  );
-
-  // Add exactly one deterministic greeting.
-  if (firstName) {
-    replyText =
-      'Hi ' +
-      firstName +
-      ',\n\n' +
-      replyText;
   }
 
   // Add exactly one deterministic signature.
@@ -929,20 +917,8 @@ async function sendConvFollowUp(enrollment) {
   // Keep greeting/signature deterministic here too.
   replyText = stripAiSignoff(replyText);
   replyText = stripAiGreeting(replyText);
-
-  const firstName = getFirstName(
-    enrollment.prospect_name
-  );
-
-  if (firstName) {
-    replyText =
-      'Hi ' +
-      firstName +
-      ',\n\n' +
-      replyText;
-  }
-
-  const signOff =
+  
+    const signOff =
     persona.fullName +
     '\n' +
     persona.title +
