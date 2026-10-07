@@ -113,15 +113,17 @@ async function enableDND(contactId, channels) {
   if (r && r.ok) console.log(`[detect] DND set for ${contactId}`);
 }
 
+// Keyword fallback, used when OpenAI is unavailable or errors
+function keywordClassify(subject, snippet) {
+  const text = `${subject} ${snippet}`.toLowerCase();
+  if (/\b(unsubscribe|remove me|opt out|stop emails|take me off)\b/.test(text)) return 'unsubscribe';
+  if (/\b(no thanks|not interested|no thank you|stop|don't contact|leave me alone|not for us|piss off|go away|f[u*]+c?k|fck|stfu)\b/.test(text) || text.includes('🖕')) return 'negative';
+  if (/\b(yes|interested|sounds good|call me|send it|book|schedule|want to see)\b/.test(text)) return 'positive';
+  return 'neutral';
+}
 // OpenAI reply classification
 async function classifyReply(subject, snippet) {
-  if (!OPENAI_KEY) {
-    const text = `${subject} ${snippet}`.toLowerCase();
-    if (/\b(unsubscribe|remove me|opt out|stop emails|take me off)\b/.test(text)) return 'unsubscribe';
-    if (/\b(no thanks|not interested|no thank you|stop|don't contact|leave me alone|not for us)\b/.test(text)) return 'negative';
-    if (/\b(yes|interested|sounds good|call me|send it|book|schedule|want to see)\b/.test(text)) return 'positive';
-    return 'neutral';
-  }
+   if (!OPENAI_KEY) return keywordClassify(subject, snippet);
   try {
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -135,18 +137,22 @@ Respond ONLY with JSON: {"intent": "positive"|"negative"|"neutral"|"unsubscribe"
 - negative: not interested, no thanks, stop contacting
 - unsubscribe: explicitly asks to unsubscribe / stop emails
 - neutral: questions or information requests that do not explicitly express interest or permission to proceed, including pricing questions such as "How much would it cost?"
-Important: asking about cost, features, setup, or how it works is NOT by itself an agreement to receive a demo.` },,
+Important: asking about cost, features, setup, or how it works is NOT by itself an agreement to receive a demo.` },
           { role: 'user', content: `Subject: ${subject}\n\nReply: ${snippet}` },
         ],
       }),
     });
     const data = await r.json();
+        if (!r.ok || data.error) {
+      console.error('[detect] classify API error:', r.status, JSON.stringify(data.error || data));
+      return keywordClassify(subject, snippet);
+    }
     const raw = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '{}';
     const parsed = JSON.parse(raw);
     return ['positive', 'negative', 'neutral', 'unsubscribe'].includes(parsed.intent) ? parsed.intent : 'neutral';
   } catch (e) {
     console.error('[detect] classify error:', e.message);
-    return 'neutral';
+        return keywordClassify(subject, snippet);
   }
 }
 
