@@ -2148,10 +2148,10 @@ app.post('/gmail-webhook', express.json(), async (req, res) => {
 
 app.post('/ghl-conversion-webhook', async (req, res) => {
   try {
-    const {
-      contactId,
-      opportunityId
-    } = req.body || {};
+        const b = req.body || {};
+    const raw = { ...b, ...(b.contact || {}), ...(b.opportunity || {}), ...(b.customData || {}) };
+    const contactId = raw.contactId || raw.contact_id || raw.id || '';
+    const opportunityId = raw.opportunityId || raw.opportunity_id || '';
 
     if (!contactId || !opportunityId) {
       return res.status(400).json({
