@@ -98,7 +98,11 @@ function factsBlock(ctx) {
   ].map(f => '- ' + f).join('\n');
 }
 
-function phaseGoal(phase) {
+function phaseGoal(phase, ctx = {}) {
+  if (ctx.demoUrl && !ctx.demoTested) {
+    return 'They already have their demo page. Get them to test it by calling Emma on the page shared earlier in this thread. Never offer to send another demo.';
+  }
+  if (ctx.demoUrl && ctx.demoTested) return 'They have tested the demo. Get them onto an onboarding call with Naman.';
   if (phase === 'cold') return 'Get explicit permission to send their personalised demo page. Do not push a call yet.';
   if (phase === 'warm') return 'Get them to test the demo page they already have.';
   return 'Get them onto an onboarding call with Naman.';
@@ -133,7 +137,7 @@ Respond ONLY with JSON:
 
 async function routeMessage(ctx) {
   const user = [
-    `PHASE: ${ctx.phase} (goal: ${phaseGoal(ctx.phase)})`,
+    `PHASE: ${ctx.phase} (goal: ${phaseGoal(ctx.phase, ctx)})`,
     '',
     'FACTS:',
     factsBlock(ctx),
@@ -160,7 +164,7 @@ async function routeMessage(ctx) {
 function drafterSystem(ctx, allowCalendar) {
   return `You are ${ctx.persona.fullName}, ${ctx.persona.title} at Creative Copyz, replying in an email thread.
 
-GOAL FOR THIS PHASE: ${phaseGoal(ctx.phase)}
+GOAL FOR THIS PHASE: ${phaseGoal(ctx.phase, ctx)}
 
 HOW TO WRITE:
 - Start directly with the message. Never open with a greeting, "Hi", "Hey", "Hello", or their name.
@@ -170,6 +174,7 @@ HOW TO WRITE:
 - At most one question, and only if it moves things forward.
 - Never use these or similar salesy phrases: just following up, checking in, just curious, circling back, touching base, did you get a chance, hope you're well.
 - Never repeat something already said in the thread (offers, links, explanations) unless they asked for it.
+- If their demo page was already sent, never offer to send a demo or a demo link. If they have not tested it yet, point them back to the demo page shared earlier in this thread and invite them to call Emma there.
 - Only state things from the FACTS list. Never invent prices, features, timelines, integrations, or promises.
 - Any call is with Naman, never with you. When inviting them to a call, introduce him as our technical director who can answer any questions they have, for example: "a quick call with Naman, our technical director, so he can answer any questions you have".
 - Never use em dashes.
@@ -225,8 +230,11 @@ function guardIssues(draft, ctx, allowCalendar) {
   }
   if (/https?:\/\//i.test(text)) issues.push('Contains a raw link. Links are not allowed in this reply.');
   if (text.includes(CALENDAR_TOKEN) && !allowCalendar) issues.push('Includes the booking link when it is not allowed.');
-  if (ctx.demoUrl && /\b(send|share|get)\b.{0,40}\b(demo|link)\b/i.test(text) && /\?/.test(text)) {
-    issues.push('Offers to send a demo that has already been sent.');
+  if (ctx.demoUrl && (
+    /\b(send|share|get|build|create|set up|prepare)\b.{0,40}\b(a|another|the|your|you)?\s*(tailored|personali[sz]ed|custom|new)?\s*(demo|demo link|demo page)\b/i.test(text) ||
+    /\b(would you like|do you want|want me to|shall i|should i|i can)\b.{0,40}\bdemo\b/i.test(text)
+  )) {
+    issues.push('Offers a demo, but their demo page was already sent. Point them back to the demo page shared earlier instead.');
   }
   if (/\b(sign[- ]?off|best regards|kind regards|cheers,)\b/i.test(text)) issues.push('Contains a sign-off.');
   return issues;
@@ -237,6 +245,7 @@ const CRITIC_SYSTEM = `You review a draft email reply before it is sent to a sal
 Score it 0 to 100 for how confident you are that sending it is the right move. Start at 100 and deduct:
 - Does not directly address what the prospect just said: -40
 - Repeats an offer, link, or explanation already in the thread: -30
+- Offers to send a demo when the demo page was already sent: -50
 - States anything not supported by the FACTS: -40
 - Sounds salesy, scripted, or pushy (follow-up filler, hype): -25
 - Longer than needed for what they wrote: -15
