@@ -1756,7 +1756,7 @@ app.post('/retell-tools/book-appointment', async (req, res) => {
     // Stop cold email sequence if this email is enrolled
     pool.query(
   `UPDATE enrollments
-      SET status = 'completed',
+      SET status = 'booked',
           ultra_warm_pending_at = NULL
     WHERE prospect_email = $1
       AND status = 'active'`,
@@ -2104,7 +2104,7 @@ if (!crmCompanyName && contactId) {
 
     const result = await pool.query(
       `UPDATE enrollments
-       SET status = 'completed',
+       SET status = 'booked',
            ultra_warm_pending_at = NULL
        WHERE id = ANY($1::int[])
        RETURNING prospect_email, company_name`,
