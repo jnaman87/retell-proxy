@@ -132,6 +132,76 @@ async function sendEmail({
   };
 }
 
+// ─── Message body extraction ─────────────────────────────────────────────────
+function decodeB64Url(data) {
+  if (!data) return '';
+  return Buffer.from(String(data).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+}
+
+function htmlToText(html) {
+  return String(html || '')
+    .replace(/<(style|script)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<hr[^>]*>/gi, '\n---\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Walks a Gmail payload and returns readable text, preferring text/plain.
+function extractText(payload) {
+  if (!payload) return '';
+  const plain = [];
+  const html = [];
+  (function walk(part) {
+    if (!part) return;
+    const type = (part.mimeType || '').toLowerCase();
+    if (part.body && part.body.data) {
+      if (type === 'text/plain') plain.push(decodeB64Url(part.body.data));
+      else if (type === 'text/html') html.push(decodeB64Url(part.body.data));
+    }
+    (part.parts || []).forEach(walk);
+  })(payload);
+  if (plain.length) return plain.join('\n').trim();
+  if (html.length) return htmlToText(html.join('\n'));
+  return '';
+}
+
+// Removes the quoted earlier conversation and our unsubscribe footer,
+// leaving only what the sender actually wrote in this message.
+function stripQuoted(text) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^On .{4,200}wrote:\s*$/i.test(t)) break;
+    if (/^-{2,}\s*Original Message\s*-{2,}/i.test(t)) break;
+    if (/^From:\s.+/i.test(t) && out.length) break;
+    if (/^Sent from my (iPhone|iPad|Android|phone|mobile)/i.test(t)) break;
+    if (/^-{2,}\s*$/.test(t) && out.length) break;
+    if (/^To stop receiving these emails/i.test(t)) break;
+    if (t.startsWith('>')) continue;
+    out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function headerGetter(msg) {
+  const headers = (msg.payload && msg.payload.headers) || [];
+  return n => {
+    const h = headers.find(x => x.name.toLowerCase() === n);
+    return h ? h.value : '';
+  };
+}
+
 async function listRecentInbound(mailbox, { days = 3, max = 50 } = {}) {
   const q    = encodeURIComponent(`in:inbox newer_than:${days}d`);
   const list = await gmailFetch(mailbox, `/messages?q=${q}&maxResults=${max}`);
@@ -140,31 +210,51 @@ async function listRecentInbound(mailbox, { days = 3, max = 50 } = {}) {
   const out = [];
   for (const m of list.messages) {
     try {
-      const msg = await gmailFetch(
-        mailbox,
-        `/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`
-      );
-      const headers = (msg.payload && msg.payload.headers) || [];
-      const get = n => {
-        const h = headers.find(x => x.name.toLowerCase() === n);
-        return h ? h.value : '';
-      };
+      const msg  = await gmailFetch(mailbox, `/messages/${m.id}?format=full`);
+      const get  = headerGetter(msg);
       const from = get('from').toLowerCase();
 
+      // Never treat our own messages as prospect replies.
+      if (from.includes(mailbox.toLowerCase())) continue;
+
+      const body = stripQuoted(extractText(msg.payload)) || msg.snippet || '';
+
       out.push({
-  id           : msg.id,
-  threadId     : msg.threadId,
-  from,
-  subject      : get('subject'),
-  snippet      : msg.snippet || '',
-  bounced      : /mailer-daemon|postmaster/.test(from),
-  internalDate : msg.internalDate ? Number(msg.internalDate) : null,
-});
+        id           : msg.id,
+        threadId     : msg.threadId,
+        from,
+        subject      : get('subject'),
+        snippet      : msg.snippet || '',
+        body,
+        bounced      : /mailer-daemon|postmaster/.test(from),
+        internalDate : msg.internalDate ? Number(msg.internalDate) : null,
+      });
     } catch (e) {
-            console.error(`[gmail] metadata read failed for ${m.id} in ${mailbox}: ${e.message}`);
+      console.error(`[gmail] message read failed for ${m.id} in ${mailbox}: ${e.message}`);
     }
   }
   return out;
+}
+
+// Full thread as plain text, oldest first. This is the source of truth for
+// what the prospect has actually seen: sequence emails, AI replies, and any
+// replies Naman sent by hand from the mailbox.
+async function getThreadTranscript(mailbox, threadId, { maxMessages = 30 } = {}) {
+  if (!threadId) return [];
+  const thread = await gmailFetch(mailbox, `/threads/${threadId}?format=full`);
+  const msgs = (thread.messages || []).slice(-maxMessages);
+  return msgs.map(msg => {
+    const get  = headerGetter(msg);
+    const from = get('from').toLowerCase();
+    return {
+      id      : msg.id,
+      role    : from.includes(mailbox.toLowerCase()) ? 'us' : 'prospect',
+      from,
+      subject : get('subject'),
+      date    : msg.internalDate ? new Date(Number(msg.internalDate)).toISOString() : '',
+      text    : stripQuoted(extractText(msg.payload)) || msg.snippet || '',
+    };
+  });
 }
 
 async function verifyMailbox(mailbox) {
@@ -186,4 +276,8 @@ async function verifyAll(mailboxes) {
   return results;
 }
 
-module.exports = { sendEmail, listRecentInbound, verifyMailbox, verifyAll };
+module.exports = {
+  sendEmail, listRecentInbound, getThreadTranscript, verifyMailbox, verifyAll,
+  // exported for tests
+  extractText, stripQuoted, htmlToText,
+};
