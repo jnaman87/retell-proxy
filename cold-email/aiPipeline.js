@@ -30,7 +30,7 @@ const FACTS = [
   'The demo receptionist on the prospect\'s page is called Emma.',
   'Each demo page stays live for 7 days and allows up to 5 test calls.',
   'Next step for an interested prospect is an onboarding call with Naman, booked through the calendar link.',
-  'Naman is the director at Creative Copyz.',
+  'Naman is the technical director at Creative Copyz. On the onboarding call he can answer any questions they have.',
 ];
 
 const BANNED_PHRASES = [
@@ -109,7 +109,7 @@ const ROUTER_SYSTEM = `You triage replies in a sales email thread for Creative C
 Read the WHOLE thread, then decide what happens with the prospect's newest message.
 
 Decisions:
-- "handoff": a human (Naman, the director) must take over. Choose this when ANY of these are true:
+- "handoff": a human (Naman, the technical director) must take over. Choose this when ANY of these are true:
   * they ask for a phone call, ask to be called or texted, or share a phone number
   * they ask about pricing, cost, packages, contracts, terms, discounts, or payment
   * they propose a specific day or time, or ask us to pick a time (we cannot book on their behalf)
@@ -171,7 +171,7 @@ HOW TO WRITE:
 - Never use these or similar salesy phrases: just following up, checking in, just curious, circling back, touching base, did you get a chance, hope you're well.
 - Never repeat something already said in the thread (offers, links, explanations) unless they asked for it.
 - Only state things from the FACTS list. Never invent prices, features, timelines, integrations, or promises.
-- Any call is with Naman, never with you.
+- Any call is with Naman, never with you. When inviting them to a call, introduce him as our technical director who can answer any questions they have, for example: "a quick call with Naman, our technical director, so he can answer any questions you have".
 - Never use em dashes.
 - No sign-off, name, or signature. The application adds it.
 ${allowCalendar
