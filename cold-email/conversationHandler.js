@@ -329,7 +329,7 @@ function replySubject(msg, transcript) {
 
 // ─── Human handoff ───────────────────────────────────────────────────────────
 const HANDOFF_NOTICE =
-  "Thanks for this. I've passed our conversation to Naman, our director, and he'll take it from here personally. " +
+  "Thanks for this. I've passed our conversation to Naman, our technical director, and he'll take it from here personally. " +
   'Expect a reply from him in this thread soon.';
 
 async function alertNaman(enrollment, { headline, reason, summary, latestText, transcript, attempts }) {
@@ -682,8 +682,8 @@ async function setContactDnd(contactId) {
 async function sendConvFollowUp(enrollment) {
   const persona = getPersona(enrollment.mailbox);
   const text =
-    'Here is the link to grab a time with Naman whenever suits: ' + CALENDAR_LINK +
-    '\n\nHe will walk you through how this would run for ' + (enrollment.company_name || 'your business') + '.';
+    'Here is the link to grab a time with Naman, our technical director, whenever suits: ' + CALENDAR_LINK +
+    '\n\nHe can answer any questions you have and walk you through how this would run for ' + (enrollment.company_name || 'your business') + '.';
 
   const transcript = await loadTranscript(enrollment);
   const subject = (transcript.find(m => m.subject) || {}).subject || (enrollment.company_name || 'our conversation');
