@@ -1,7 +1,8 @@
 'use strict';
 
 const pool = require('./pool');
-const { sendEmail } = require('./gmail-sender');
+const { sendEmail, getThreadTranscript } = require('./gmail-sender');
+const { runPipeline } = require('./aiPipeline');
 const { buildDemoForEnrollment } = require('./demoBuilder');
 
 const {
@@ -11,9 +12,10 @@ const {
   OT_UNSUBSCRIBED
 } = require('./crmHelpers');
 
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const CALENDAR_LINK = 'https://api.leadconnectorhq.com/widget/bookings/aivoice-onboarding';
 const FOLLOWUP_DAYS = 2;
+const SEQUENCE_PAUSE_DAYS = 3;   // sequence waits this long after any conversation
+const HANDOFF_ALERT_EMAIL = process.env.HANDOFF_ALERT_EMAIL || '';
 
 // CRM helper used by the conversational handler.
 // Kept local to avoid a circular dependency with replyDetector.js.
@@ -144,156 +146,6 @@ function getPersona(mailbox) {
   };
 }
 
-// Build OpenAI message history array
-function buildMessages(enrollment, systemPrompt, lastUserMsg) {
-  const history = Array.isArray(enrollment.conversation_history)
-    ? enrollment.conversation_history
-    : [];
-
-  const recent = history.slice(-10);
-
-  return [
-    {
-      role: 'system',
-      content: systemPrompt
-    },
-    ...recent.map(function (h) {
-      return {
-        role: h.role === 'prospect' ? 'user' : 'assistant',
-        content: h.content
-      };
-    }),
-    {
-      role: 'user',
-      content: lastUserMsg
-    }
-  ];
-}
-
-// Call OpenAI and return parsed JSON
-async function callOpenAI(messages) {
-  const res = await fetch(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + OPENAI_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        temperature: 0.7,
-        response_format: {
-          type: 'json_object'
-        },
-        messages: messages
-      })
-    }
-  );
-
-  const data = await res.json();
-
-  const parsed = JSON.parse(
-    data.choices &&
-    data.choices[0] &&
-    data.choices[0].message &&
-    data.choices[0].message.content
-      ? data.choices[0].message.content
-      : '{}'
-  );
-
-  if (parsed.reply) {
-    parsed.reply = parsed.reply.replace(/\\n/g, '\n');
-  }
-
-  return parsed;
-}
-
-// System prompt for replying to an incoming message
-function replySystemPrompt(enrollment, persona) {
-  const firstName =
-    ((enrollment.prospect_name || '').split(' ')[0] || 'there').trim();
-
-  const demoLine = enrollment.demo_page_url
-    ? 'A personalised AI Voice Receptionist demo has been built: ' +
-      enrollment.demo_page_url
-    : 'No demo has been built yet.';
-
-  return [
-    'You are ' + persona.fullName + ', ' + persona.title +
-      ' at Creative Copyz (an AI solutions agency).',
-    'Replying to a business owner who received outreach about an AI Voice Receptionist.',
-    '',
-    'PRIMARY GOAL DEPENDS ON THE LEAD\'S CURRENT SEQUENCE PHASE:',
-    '- cold: get the prospect to explicitly agree to receive their personalised demo link. Do NOT try to book an onboarding call at this stage.',
-    '- warm: get the prospect to test the personalised demo that has been shared. Do NOT push for an onboarding call unless they have already tested or clearly want to move forward.',
-    '- ultra_warm: help the prospect schedule an AI Voice Receptionist Onboarding Call with Naman.',
-    '- Current phase: ' + (enrollment.phase || 'cold'),
-    '',
-    'STRICT RULES:',
-    '- NEVER use em dashes in any form',
-        '- Do not start with a greeting, salutation, or their name. Start directly with the body.',
-    '- Do not generate a sign-off, closing, sender name, job title, or company signature. The application adds the signature.',
-    '- Body: 2 to 4 sentences, no filler phrases',
-    'CLASSIFICATION:',
-'- positive: the prospect explicitly agrees to receive the demo or explicitly asks you to send, share, show, or provide the demo or demo link.',
-'- neutral: the prospect asks a question, requests information, expresses curiosity, or responds without explicitly agreeing to receive the demo.',
-'- negative: the prospect says they are not interested, asks to stop receiving emails, unsubscribes, opts out, or otherwise clearly rejects further outreach.',
-'- Never treat a question as positive merely because it contains words like "interesting", "sounds good", "cost", or "how much".',
-'- A demo is created ONLY for positive replies.',
-'- A neutral reply MUST NOT create a demo.',
-'- A negative reply MUST NOT create a demo or send any further email.',
-    '- warm phase: focus on getting the prospect to try/test the personalised demo already shared. Do NOT push for an onboarding call merely because they ask questions.',
-    '- ultra_warm phase: if the prospect wants to move forward, talk, schedule, or asks for next steps, set sendCalLink to true.',
-'- ultra_warm phase: if conv_status is calendar_sent, do NOT set sendCalLink to true unless the prospect explicitly asks for the calendar link again.',
-    '- Whenever a call is mentioned, it must be framed as a call with Naman, never as a call with you/the email persona.',
-    '- Do not repeat the calendar link if they already have it unless they ask',
-    '- cold phase, neutral reply: answer the prospect’s question clearly, then end by asking for explicit permission to send a tailored AI Voice Receptionist demo link for their business.',
-'- The cold-phase CTA must be about sending the tailored demo link or letting them test the tailored receptionist. Do not end with a generic offer for more information, more details, or a call.',
-'- A prospect becomes positive only when they explicitly agree to receive, see, test, or be sent that demo.',
-    '- warm phase: end with an open-ended question that encourages them to test the demo or tell you what they think after testing it.',
-    '- ultra_warm phase: end with an open-ended question that moves toward scheduling a call with Naman.',
-    '- Do not say that a demo has been prepared, created, generated, built, sent, or is ready unless the application provides a demo URL.',
-    '- If no demo URL is provided, do not claim that the prospect has been sent a demo.',
-    '- Never break a sentence across multiple lines. Only start a new paragraph after a full stop, question mark, or exclamation mark.',
-    '',
-    'CONTEXT:',
-    '- Company: ' + (enrollment.company_name || 'their business') +
-      ' (' + (enrollment.niche || '') + ')',
-    '- City: ' + (enrollment.prospect_city || ''),
-    '- ' + demoLine,
-    '- The application, not the AI, is the final authority on whether a demo should be created.',
-    '',
-    'Respond ONLY with valid JSON. Do not include markdown, code fences, or any text outside the JSON object.',
-'The JSON must contain exactly these fields:',
-'{"classification":"positive","reply":"full email body without greeting or signature","sendCalLink":false}',
-'"classification" must be exactly one of: "positive", "neutral", "negative".',
-'"reply" must contain the actual email body.',
-'"sendCalLink" must be a boolean: true or false, never a string.'
-  ].join('\n');
-}
-
-// System prompt for follow-up after calendar link sent
-function followUpSystemPrompt(enrollment, persona) {
-  return [
-    'You are ' + persona.fullName + ', ' + persona.title + ' at Creative Copyz.',
-    'You sent a booking link for an AI Voice Receptionist Onboarding Call with Naman but have not heard back.',
-    'Write a brief friendly follow-up nudge. Include the booking link naturally.',
-    '',
-    'STRICT RULES:',
-    '- NEVER use em dashes in any form',
-        '- Do not start with a greeting, salutation, or their name. Start directly with the body.',
-    '- Do not generate a sign-off, closing, sender name, job title, or company signature. The application adds the signature.',
-    '- Body: 2 to 3 sentences maximum',
-    '- Include booking link: ' + CALENDAR_LINK,
-    '- Always frame the booking as a call with Naman.',
-    '- End with an open-ended question inviting them to confirm the call with Naman, ask if a different time works, or ask if they have any questions.',
-    '- Never break a sentence across multiple lines.',
-    '',
-    'Respond ONLY with valid JSON:',
-    '{"reply":"full email body without greeting or signature"}'
-  ].join('\n');
-}
 
 // Send a message in the existing Gmail thread
 async function sendInThread(enrollment, subject, body) {
@@ -406,371 +258,318 @@ function stripAiSignoff(text) {
   return t.trim();
 }
 
-function hasExplicitDemoPermission(text) {
-  const t = String(text || '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return (
-    /\b(send|share|give|show|provide|forward)\b.{0,100}\b(the\s+)?(demo|link|demo link|demonstration)\b/.test(t) ||
-    /\b(the\s+)?(demo|demo link|demonstration)\b.{0,100}\b(send|share|give|show|provide|forward)\b/.test(t) ||
-    /\b(i('| )?d|i would|i want|i'd like|i would like|please)\b.{0,100}\b(test|try|see|check out|look at)\b.{0,100}\b(the\s+)?(demo|link|demo link|it)\b/.test(t) ||
-    /\b(yes|yeah|yep|sure|okay|ok|absolutely|definitely|sounds good|please do|go ahead)\b.{0,100}\b(send|share|give|show|provide|forward)\b/.test(t)
-  );
+async function addNote(contactId, body) {
+  if (!contactId || !CRM_API_KEY) return;
+  await fetch(CRM_API + '/contacts/' + encodeURIComponent(contactId) + '/notes', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + CRM_API_KEY,
+      Version: '2021-04-15',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ body })
+  }).catch(e => console.error('[conv] note failed:', e.message));
 }
 
-function hasNegativeReply(text) {
-  const t = String(text || '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return (
-    /\b(not interested|no thanks|no thank you|don't contact|do not contact|stop contacting|stop emailing|remove me|unsubscribe|opt out|opt-out|take me off|leave me alone|not for me|pass on this|no longer interested)\b/.test(t)
-  );
+function signOff(persona) {
+  return persona.fullName + '\n' + persona.title + ' | Creative Copyz';
 }
 
-function hasGenericAffirmation(text) {
-  const t = String(text || '')
-    .toLowerCase()
-    .trim();
-
-  return /^(yes|yeah|yep|sure|okay|ok|absolutely|definitely|sounds good|that sounds good|please do|go ahead|i'd like that|id like that|yes please)[.!]?$/.test(t);
+function buildEmailHtml(text, persona) {
+  const body = cleanReplyFormatting(stripAiGreeting(stripAiSignoff(text)));
+  return toHtmlEmail(body + '\n\n' + signOff(persona));
 }
 
-function classifyProspectReply(text) {
-  const t = String(text || '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
-  if (hasNegativeReply(t)) {
-    return 'negative';
+// Thread as plain text, oldest first. Gmail is the source of truth; the stored
+// history is the fallback if Gmail can't be read.
+async function loadTranscript(enrollment) {
+  try {
+    const t = await getThreadTranscript(enrollment.mailbox, enrollment.thread_id);
+    if (t.length) return t;
+  } catch (e) {
+    console.error('[conv] transcript read failed for ' + enrollment.prospect_email + ':', e.message);
+  }
+  const history = Array.isArray(enrollment.conversation_history) ? enrollment.conversation_history : [];
+  return history.map(h => ({
+    role: h.role === 'prospect' ? 'prospect' : 'us',
+    date: h.timestamp || '',
+    text: String(h.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  }));
+}
+
+// Every prospect message since our last email, so two quick replies are
+// answered once, together.
+function latestProspectText(transcript, msg) {
+  const out = [];
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    if (transcript[i].role === 'us') break;
+    out.unshift(transcript[i].text);
+  }
+  const joined = out.filter(Boolean).join('\n\n').trim();
+  return joined || String(msg.body || msg.snippet || '').trim();
+}
+
+function appendHistory(enrollment, entries) {
+  const history = Array.isArray(enrollment.conversation_history) ? enrollment.conversation_history : [];
+  return [...history, ...entries].slice(-40);
+}
+
+function replySubject(msg, transcript) {
+  const subject = (msg && msg.subject) ||
+    (transcript.length && transcript[transcript.length - 1].subject) || 'our conversation';
+  return subject.startsWith('Re:') ? subject : 'Re: ' + subject;
+}
+
+// ─── Human handoff ───────────────────────────────────────────────────────────
+const HANDOFF_NOTICE =
+  "Thanks for this. I've passed our conversation to Naman, our director, and he'll take it from here personally. " +
+  'Expect a reply from him in this thread soon.';
+
+async function alertNaman(enrollment, { headline, reason, summary, latestText, transcript, attempts }) {
+  if (!HANDOFF_ALERT_EMAIL) {
+    console.error('[handoff] HANDOFF_ALERT_EMAIL is not set, alert not emailed for ' + enrollment.prospect_email);
+    return;
   }
 
-  if (
-    hasExplicitDemoPermission(t) ||
-    hasGenericAffirmation(t)
-  ) {
-    return 'positive';
-  }
+  const recent = (transcript || []).slice(-6).map(m =>
+    '<p style="margin:0 0 10px 0;"><b>' + (m.role === 'us' ? 'Us' : 'Prospect') + '</b> ' +
+    escapeHtml(m.date || '') + '<br>' + escapeHtml(m.text || '').replace(/\n/g, '<br>') + '</p>'
+  ).join('');
 
-  return 'neutral';
-}
+  const drafts = (attempts || []).filter(a => a.draft).map(a =>
+    '<li>Score ' + a.score + ': ' + escapeHtml(a.draft) +
+    (a.issues && a.issues.length ? '<br><i>' + escapeHtml(a.issues.join('; ')) + '</i>' : '') + '</li>'
+  ).join('');
 
-// Main: handle an incoming reply conversationally
-async function handleConversationalReply(enrollment, msg) {
-
-  const persona = getPersona(enrollment.mailbox);
-
-  const history = Array.isArray(enrollment.conversation_history)
-    ? enrollment.conversation_history
-    : [];
-
-  const withIncoming = [
-    ...history,
-    {
-      role: 'prospect',
-      content: 'Subject: ' + msg.subject + '\n' + msg.snippet,
-      timestamp: new Date().toISOString(),
-      phase: enrollment.phase,
-      msgId: msg.id
-    }
-  ];
-  if (
-  enrollment.phase === 'ultra_warm' &&
-  enrollment.conv_status === 'calendar_sent'
-) {
-  console.log(
-    `[conv] ${enrollment.prospect_email} already received calendar link -- conversational reply only`
-  );
-}
-
-  let aiResult;
+  const html =
+    '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:680px;">' +
+    '<h2 style="margin:0 0 12px 0;">' + escapeHtml(headline) + '</h2>' +
+    '<p><b>Prospect:</b> ' + escapeHtml(enrollment.prospect_name || '') + ' &lt;' + escapeHtml(enrollment.prospect_email) + '&gt;<br>' +
+    '<b>Company:</b> ' + escapeHtml(enrollment.company_name || '') + (enrollment.prospect_city ? ', ' + escapeHtml(enrollment.prospect_city) : '') + '<br>' +
+    '<b>Phase:</b> ' + escapeHtml(enrollment.phase || '') + '<br>' +
+    '<b>Reply from mailbox:</b> ' + escapeHtml(enrollment.mailbox) + '<br>' +
+    (enrollment.demo_page_url ? '<b>Demo:</b> ' + escapeHtml(enrollment.demo_page_url) + '<br>' : '') +
+    '<b>Enrollment id:</b> ' + enrollment.id + '</p>' +
+    '<p><b>Why:</b> ' + escapeHtml(reason || '') + '</p>' +
+    (summary ? '<p><b>Where they stand:</b> ' + escapeHtml(summary) + '</p>' : '') +
+    '<p><b>Their latest message:</b><br>' + escapeHtml(latestText || '').replace(/\n/g, '<br>') + '</p>' +
+    (drafts ? '<p><b>Rejected AI drafts:</b></p><ul>' + drafts + '</ul>' : '') +
+    '<hr><p><b>Recent thread:</b></p>' + recent +
+    '<hr><p style="color:#666;font-size:12px;">All automated emails to this lead are paused. ' +
+    'Reply to them from ' + escapeHtml(enrollment.mailbox) + ' in the same thread. To hand the lead back to the AI, run:<br>' +
+    "<code>UPDATE enrollments SET status = 'active', conv_status = 'active' WHERE id = " + enrollment.id + ';</code></p>' +
+    '</div>';
 
   try {
-    const system = replySystemPrompt(
-      {
-        ...enrollment,
-        conversation_history: withIncoming
-      },
-      persona
-    );
-
-    const messages = buildMessages(
-      {
-        ...enrollment,
-        conversation_history: withIncoming
-      },
-      system,
-      'Subject: ' + msg.subject + '\n\n' + msg.snippet
-    );
-
-    const parsed = await callOpenAI(messages);
-
-const validClassifications = ['positive', 'neutral', 'negative'];
-
-const aiClassification =
-  validClassifications.includes(parsed.classification)
-    ? parsed.classification
-    : 'neutral';
-
-const classification =
-  hasGenericAffirmation(msg.snippet || '')
-    ? 'positive'
-    : aiClassification;
-
-if (classification === 'negative') {
-  await handleNegativeReply(
-    enrollment,
-    msg,
-    msg.snippet || ''
-  );
-
-  return;
+    await sendEmail({
+      mailbox: enrollment.mailbox,
+      fromName: 'Creative Copyz Alerts',
+      to: HANDOFF_ALERT_EMAIL,
+      subject: '[Handoff] ' + (enrollment.company_name || enrollment.prospect_email) + ': ' + (headline || 'needs you'),
+      body: html
+    });
+    console.log('[handoff] alert emailed for ' + enrollment.prospect_email);
+  } catch (e) {
+    console.error('[handoff] alert email failed for ' + enrollment.prospect_email + ':', e.message);
+  }
 }
-if (classification === 'positive') {
+
+async function handoffToNaman(enrollment, msg, transcript, latestText, result) {
+  const persona = getPersona(enrollment.mailbox);
+  const alreadyHandedOff = enrollment.status === 'handoff';
+  let sendResult = null;
+
+  // Tell the prospect once. Later messages in a handed-off thread only alert Naman.
+  if (!alreadyHandedOff) {
+    try {
+      sendResult = await sendInThread(enrollment, replySubject(msg, transcript), buildEmailHtml(HANDOFF_NOTICE, persona));
+    } catch (e) {
+      console.error('[handoff] notice send failed for ' + enrollment.prospect_email + ':', e.message);
+    }
+  }
+
+  const history = appendHistory(enrollment, [
+    { role: 'prospect', content: latestText, timestamp: new Date().toISOString(), phase: enrollment.phase, msgId: msg.id },
+    ...(sendResult ? [{ role: 'assistant', content: HANDOFF_NOTICE, timestamp: new Date().toISOString(), type: 'handoff' }] : [])
+  ]);
+
   await pool.query(
     `UPDATE enrollments
-        SET positive_reply_at = COALESCE(positive_reply_at, NOW())
+        SET status = 'handoff',
+            conv_status = 'human_handoff',
+            handoff_at = COALESCE(handoff_at, NOW()),
+            handoff_reason = $2,
+            ultra_warm_pending_at = NULL,
+            conversation_history = $3::jsonb,
+            last_message_id = COALESCE($4, last_message_id),
+            last_conv_at = NOW()
       WHERE id = $1`,
-    [enrollment.id]
-  );
-}
-
-    const guardedBuildDemo =
-  enrollment.phase === 'cold' &&
-  classification === 'positive';
-
-    aiResult = {
-  reply: parsed.reply || null,
-  buildDemo: guardedBuildDemo,
-  sendCalLink: Boolean(parsed.sendCalLink),
-  classification
-};
-
-  if (!aiResult.reply) {
-    console.error(
-      '[conv] empty reply for ' +
-      enrollment.prospect_email
-    );
-    return;
-  }
-
-  // Demo creation happens BEFORE the final email is constructed.
-  let demoUrl = enrollment.demo_page_url || null;
-  let demoWasSent = false;
-
-  if (
-    enrollment.phase === 'cold' &&
-    aiResult.buildDemo
-  ) {
-    try {
-      demoUrl = await buildDemoForEnrollment(enrollment);
-
-      if (!demoUrl) {
-        throw new Error('No demo URL returned');
-      }
-
-      await pool.query(
-        'UPDATE enrollments SET demo_page_url = $1 WHERE id = $2',
-        [
-          demoUrl,
-          enrollment.id
-        ]
-      );
-
-      demoWasSent = true;
-    } catch (err) {
-      console.error(
-        '[conv] demo creation failed for ' +
-        enrollment.prospect_email +
-        ':',
-        err.message
-      );
-
-      demoWasSent = false;
-      demoUrl = enrollment.demo_page_url || null;
-    }
-  }
-
-  // Application owns the greeting and signature.
-  // Strip anything GPT may have generated first.
-  let replyText = stripAiSignoff(aiResult.reply);
-  if (enrollment.phase === 'ultra_warm' && aiResult.sendCalLink) {
-  replyText =
-    `Absolutely! Let's schedule an onboarding call with Naman. ` +
-    `You can choose a convenient time here: ${CALENDAR_LINK}. ` +
-    `Looking forward to helping you get started!`;
-}
-  replyText = stripAiGreeting(replyText);
-
-  // If the demo was successfully created, completely override the AI
-  // response so the email contains the real URL.
-  if (
-  classification === 'positive' &&
-  demoWasSent &&
-  demoUrl
-) {
-  replyText =
-  'Absolutely. Here is a tailored AI Voice Receptionist page for ' +
-  (enrollment.company_name || 'your business') +
-  ': ' +
-  demoUrl +
-  '\n\n' +
-  'It shows how it could support your business, and you can test the demo agent directly on the page.';
-} else if (!demoUrl) {
-    // Prevent the AI from falsely claiming that a demo was created or sent.
-    replyText = replyText
-      .replace(
-        /\b(?:I've|I have)\s+(?:prepared|created|built|generated|made|sent|shared)\s+(?:your|the)\s+(?:personalised|personalized)?\s*(?:AI Voice Receptionist\s+)?demo\b[.!]?/gi,
-        ''
-      )
-      .replace(
-        /\b(?:your|the)\s+(?:personalised|personalized)?\s*(?:AI Voice Receptionist\s+)?demo\s+(?:is|has been)\s+(?:ready|prepared|created|built|generated|available)\b[.!]?/gi,
-        ''
-      )
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
-
-  // Add exactly one deterministic signature.
-  const signOff =
-    persona.fullName +
-    '\n' +
-    persona.title +
-    ' | Creative Copyz';
-
-  const cleanReply = toHtmlEmail(
-    cleanReplyFormatting(
-      replyText
-    ) +
-    '\n\n' +
-    signOff
+    [enrollment.id, result.reason || '', JSON.stringify(history), sendResult ? sendResult.messageId : null]
   );
 
-  let sendResult;
+  if (!alreadyHandedOff) {
+    await tagContact(enrollment.contact_id, 'aivoice_human_handoff');
+    await addNote(enrollment.contact_id,
+      'AI handed this conversation to Naman.\nReason: ' + (result.reason || '') +
+      (result.summary ? '\nSummary: ' + result.summary : '') +
+      '\n\nLatest message:\n' + latestText);
+  }
+
+  await alertNaman(enrollment, {
+    headline: alreadyHandedOff ? 'New message in a thread you own' : 'Prospect needs you',
+    reason: alreadyHandedOff ? 'The prospect wrote again after the handoff.' : result.reason,
+    summary: result.summary,
+    latestText,
+    transcript,
+    attempts: result.attempts
+  });
+
+  console.log('[handoff] ' + enrollment.prospect_email + ' -> handed to Naman (' + (result.reason || '') + ')');
+}
+
+// ─── Main: handle an incoming reply ──────────────────────────────────────────
+async function handleConversationalReply(enrollment, msg) {
+  const persona = getPersona(enrollment.mailbox);
 
   try {
-    sendResult = await sendInThread(
-      enrollment,
-      msg.subject,
-      cleanReply
-    );
-  } catch (e) {
-    console.error(
-      '[conv] send failed for ' +
-      enrollment.prospect_email +
-      ':',
-      e.message
-    );
-    return;
-  }
+    const transcript = await loadTranscript(enrollment);
+    const latestText = latestProspectText(transcript, msg);
 
-  await tagContact(
-  enrollment.contact_id,
-  'aivoice_reply_received'
-);
-
-  // Only tag the demo as sent after the email containing the demo URL
-  // was successfully handed off to Gmail.
-  if (
-  demoWasSent &&
-  typeof demoUrl === 'string' &&
-  /^https?:\/\//i.test(demoUrl)
-) {
-  const contactId = enrollment.contact_id;
-
-  // Contact tag
-  await tagContact(
-    contactId,
-    'aivoice_demo_sent'
-  );
-
-  // Pipeline I → Demo Sent
-  const outboundOpp = await findOpportunity(
-    contactId,
-    OT_PIPELINE
-  );
-
-  if (outboundOpp) {
-    await moveOpportunity(
-      outboundOpp.id,
-      OT_DEMO_SENT
-    );
-  } else {
-    console.error(
-      `[conv] No outbound opportunity found for ${contactId} when demo was sent`
-    );
-  }
-}
-
-  const finalHistory = [
-    ...withIncoming,
-    {
-      role: 'assistant',
-      content: cleanReply,
-      timestamp: new Date().toISOString(),
-      phase: enrollment.phase
+    // A thread Naman owns never gets an AI reply.
+    if (enrollment.status === 'handoff') {
+      await handoffToNaman(enrollment, msg, transcript, latestText, { reason: 'Prospect wrote again after handoff.' });
+      return;
     }
-  ];
 
-  const newConvStatus =
-    aiResult.sendCalLink
-      ? 'calendar_sent'
-      : 'active';
+    // Leads who already booked a call with Naman go straight to him.
+    if (enrollment.status === 'booked') {
+      await handoffToNaman(enrollment, msg, transcript, latestText, {
+        reason: 'This lead has already booked a call and has written in again.'
+      });
+      return;
+    }
 
-  // Sending the demo is the cold -> warm transition.
-  // Delay the first warm-sequence email.
-  const nextPhase = demoWasSent
-    ? 'warm'
-    : enrollment.phase;
+    const result = await runPipeline({
+      phase: enrollment.phase || 'cold',
+      persona,
+      prospectName: enrollment.prospect_name,
+      companyName: enrollment.company_name,
+      city: enrollment.prospect_city,
+      demoUrl: enrollment.demo_page_url || null,
+      demoTested: Boolean(enrollment.demo_tested_at),
+      calendarLink: CALENDAR_LINK,
+      transcript,
+      latestText
+    });
 
-  const nextStatus = 'active';
+    if (result.action === 'negative') {
+      await handleNegativeReply(enrollment, msg, latestText);
+      return;
+    }
 
-  await pool.query(
-    'UPDATE enrollments SET status = $1, phase = $2, ' +
-    'step = CASE WHEN $3 THEN 0 ELSE step END, ' +
-    'demo_page_url = CASE WHEN $3 THEN $4 ELSE demo_page_url END, ' +
-    'next_send_at = CASE WHEN $3 THEN NOW() + INTERVAL \'2 days\' ELSE next_send_at END, ' +
-    'conversation_history = $5::jsonb, ' +
-    'conv_status = $6, ' +
-    'calendar_sent_at = CASE WHEN $7 THEN NOW() ELSE calendar_sent_at END, ' +
-    'last_message_id = $8, ' +
-    'last_conv_at = NOW(), ' +
-    'conv_followup_at = CASE WHEN $7 THEN NOW() + INTERVAL \'' +
-    FOLLOWUP_DAYS +
-    ' days\' ELSE conv_followup_at END ' +
-    'WHERE id = $9',
-    [
-      nextStatus,
-      nextPhase,
-      demoWasSent,
-      demoUrl,
-      JSON.stringify(finalHistory),
-      newConvStatus,
-      aiResult.sendCalLink,
-      sendResult.messageId,
-      enrollment.id
-    ]
-  );
+    if (result.action === 'handoff') {
+      await handoffToNaman(enrollment, msg, transcript, latestText, result);
+      return;
+    }
 
-  console.log(
-    '[conv] ' +
-    enrollment.prospect_email +
-    ' -> replied (' +
-    newConvStatus +
-    ')' +
-    (demoWasSent ? ' -> warm, demo sent' : '')
-  );
-} catch (e) {
-    console.error(
-      '[conv] error while handling reply for ' +
-        enrollment.prospect_email +
-        ':',
-      e.message
+    if (result.action === 'no_reply') {
+      const history = appendHistory(enrollment, [
+        { role: 'prospect', content: latestText, timestamp: new Date().toISOString(), phase: enrollment.phase, msgId: msg.id }
+      ]);
+      await pool.query(
+        'UPDATE enrollments SET conversation_history = $1::jsonb, last_conv_at = NOW() WHERE id = $2',
+        [JSON.stringify(history), enrollment.id]
+      );
+      console.log('[conv] ' + enrollment.prospect_email + ' -> no reply needed (' + result.reason + ')');
+      return;
+    }
+
+    // ── Cold lead explicitly asked for the demo ──────────────────────────────
+    let replyText;
+    let demoWasSent = false;
+    let demoUrl = enrollment.demo_page_url || null;
+
+    if (result.action === 'send_demo') {
+      try {
+        demoUrl = await buildDemoForEnrollment(enrollment);
+        if (!demoUrl) throw new Error('No demo URL returned');
+        demoWasSent = true;
+      } catch (err) {
+        console.error('[conv] demo creation failed for ' + enrollment.prospect_email + ':', err.message);
+        await handoffToNaman(enrollment, msg, transcript, latestText, {
+          reason: 'Prospect asked for the demo but the demo build failed: ' + err.message,
+          summary: result.summary
+        });
+        return;
+      }
+      replyText =
+        'Here it is, built for ' + (enrollment.company_name || 'your business') + ': ' + demoUrl +
+        '\n\nYou can call Emma straight from the page and hear how she handles your calls.';
+    } else {
+      replyText = result.text;
+    }
+
+    const html = buildEmailHtml(replyText, persona);
+    let sendResult;
+    try {
+      sendResult = await sendInThread(enrollment, replySubject(msg, transcript), html);
+    } catch (e) {
+      console.error('[conv] send failed for ' + enrollment.prospect_email + ':', e.message);
+      return;
+    }
+
+    await tagContact(enrollment.contact_id, 'aivoice_reply_received');
+
+    if (demoWasSent) {
+      await tagContact(enrollment.contact_id, 'aivoice_demo_sent');
+      const outboundOpp = await findOpportunity(enrollment.contact_id, OT_PIPELINE);
+      if (outboundOpp) await moveOpportunity(outboundOpp.id, OT_DEMO_SENT);
+      else console.error('[conv] No outbound opportunity found for ' + enrollment.contact_id + ' when demo was sent');
+    }
+
+    const history = appendHistory(enrollment, [
+      { role: 'prospect', content: latestText, timestamp: new Date().toISOString(), phase: enrollment.phase, msgId: msg.id },
+      { role: 'assistant', content: replyText, timestamp: new Date().toISOString(), phase: enrollment.phase, score: result.score || null }
+    ]);
+
+    const calendarSent = Boolean(result.includesCalendar);
+
+    // Demo sent = cold -> warm, warm sequence starts in 2 days.
+    // Any other reply pauses the sequence so emails don't talk over the conversation.
+    await pool.query(
+      `UPDATE enrollments SET
+         status = 'active',
+         phase = CASE WHEN $2 THEN 'warm' ELSE phase END,
+         step = CASE WHEN $2 THEN 0 ELSE step END,
+         demo_page_url = CASE WHEN $2 THEN $3 ELSE demo_page_url END,
+         next_send_at = CASE
+           WHEN $2 THEN NOW() + INTERVAL '2 days'
+           WHEN next_send_at IS NULL THEN NULL
+           ELSE GREATEST(next_send_at, NOW() + INTERVAL '${SEQUENCE_PAUSE_DAYS} days')
+         END,
+         conversation_history = $4::jsonb,
+         conv_status = CASE WHEN $5 THEN 'calendar_sent' ELSE COALESCE(NULLIF(conv_status, 'human_handoff'), 'active') END,
+         calendar_sent_at = CASE WHEN $5 THEN NOW() ELSE calendar_sent_at END,
+         conv_followup_at = CASE WHEN $5 THEN NOW() + INTERVAL '${FOLLOWUP_DAYS} days' ELSE conv_followup_at END,
+         last_message_id = $6,
+         last_conv_at = NOW()
+       WHERE id = $1`,
+      [enrollment.id, demoWasSent, demoUrl, JSON.stringify(history), calendarSent, sendResult.messageId]
     );
+
+    console.log('[conv] ' + enrollment.prospect_email + ' -> replied' +
+      (result.score ? ' (score ' + result.score + ')' : '') +
+      (demoWasSent ? ' -> warm, demo sent' : '') +
+      (calendarSent ? ' -> calendar link sent' : ''));
+  } catch (e) {
+    console.error('[conv] error while handling reply for ' + enrollment.prospect_email + ':', e.message);
   }
 }
 
@@ -878,132 +677,48 @@ async function setContactDnd(contactId) {
   }
 }
 
-
-// Periodic: send follow-up when no reply after calendar link sent
+// Periodic: one nudge, only when nothing else is going out to this lead.
+// Fixed wording, so it can never drift into "just following up" filler.
 async function sendConvFollowUp(enrollment) {
   const persona = getPersona(enrollment.mailbox);
+  const text =
+    'Here is the link to grab a time with Naman whenever suits: ' + CALENDAR_LINK +
+    '\n\nHe will walk you through how this would run for ' + (enrollment.company_name || 'your business') + '.';
 
-  let replyText;
-
-  try {
-    const system = followUpSystemPrompt(
-      enrollment,
-      persona
-    );
-
-    const messages = buildMessages(
-      enrollment,
-      system,
-      '[no reply since calendar link sent - send follow-up]'
-    );
-
-    const parsed = await callOpenAI(messages);
-
-    replyText = parsed.reply || null;
-  } catch (e) {
-    console.error(
-      '[conv] followup error for ' +
-      enrollment.prospect_email +
-      ':',
-      e.message
-    );
-    return;
-  }
-
-  if (!replyText) {
-    return;
-  }
-
-  // Keep greeting/signature deterministic here too.
-  replyText = stripAiSignoff(replyText);
-  replyText = stripAiGreeting(replyText);
-  
-    const signOff =
-    persona.fullName +
-    '\n' +
-    persona.title +
-    ' | Creative Copyz';
-
-  const cleanFollowUp = toHtmlEmail(
-    cleanReplyFormatting(
-      replyText
-    ) +
-    '\n\n' +
-    signOff
-  );
-
-  const history = Array.isArray(
-    enrollment.conversation_history
-  )
-    ? enrollment.conversation_history
-    : [];
-
-  const lastSubject =
-    history
-      .filter(function (h) {
-        return h.role === 'prospect';
-      })
-      .slice(-1)[0]
-      ?.content
-      ?.split('\n')[0]
-      ?.replace('Subject: ', '') ||
-    'our conversation';
+  const transcript = await loadTranscript(enrollment);
+  const subject = (transcript.find(m => m.subject) || {}).subject || (enrollment.company_name || 'our conversation');
 
   let sendResult;
-
   try {
-    sendResult = await sendInThread(
-      enrollment,
-      lastSubject,
-      cleanFollowUp
-    );
+    sendResult = await sendInThread(enrollment, subject, buildEmailHtml(text, persona));
   } catch (e) {
-    console.error(
-      '[conv] followup send failed for ' +
-      enrollment.prospect_email +
-      ':',
-      e.message
-    );
+    console.error('[conv] nudge send failed for ' + enrollment.prospect_email + ':', e.message);
     return;
   }
 
-  const updatedHistory = [
-    ...history,
-    {
-      role: 'assistant',
-      content: cleanFollowUp,
-      timestamp: new Date().toISOString(),
-      type: 'followup'
-    }
-  ];
+  const history = appendHistory(enrollment, [
+    { role: 'assistant', content: text, timestamp: new Date().toISOString(), type: 'followup' }
+  ]);
 
   await pool.query(
-    'UPDATE enrollments SET ' +
-    'conversation_history = $1::jsonb, ' +
-    'last_message_id = $2, ' +
-    'last_conv_at = NOW(), ' +
-    'conv_followup_at = NOW() + INTERVAL \'' +
-    FOLLOWUP_DAYS +
-    ' days\' ' +
-    'WHERE id = $3',
-    [
-      JSON.stringify(updatedHistory),
-      sendResult.messageId,
-      enrollment.id
-    ]
+    `UPDATE enrollments SET
+       conversation_history = $1::jsonb,
+       last_message_id = $2,
+       last_conv_at = NOW(),
+       conv_status = 'calendar_nudged',
+       conv_followup_at = NULL
+     WHERE id = $3`,
+    [JSON.stringify(history), sendResult.messageId, enrollment.id]
   );
 
-  console.log(
-    '[conv] ' +
-    enrollment.prospect_email +
-    ' -> follow-up sent, next in ' +
-    FOLLOWUP_DAYS +
-    ' days'
-  );
+  console.log('[conv] ' + enrollment.prospect_email + ' -> single calendar nudge sent');
 }
 
 module.exports = {
   handleConversationalReply,
   sendConvFollowUp,
-  getPersona
+  getPersona,
+  // exported for tests
+  latestProspectText,
+  buildEmailHtml
 };
