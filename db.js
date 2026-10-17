@@ -86,6 +86,17 @@ await pool.query(
    ADD COLUMN IF NOT EXISTS demo_tested_at TIMESTAMPTZ`
 ).catch(e => console.warn('[db] demo_tested_at migration skipped:', e.message));
 
+  // AI reply pipeline + human handoff
+  for (const col of [
+    'last_inbound_message_id TEXT',
+    'last_inbound_at BIGINT',
+    'handoff_at TIMESTAMPTZ',
+    'handoff_reason TEXT',
+  ]) {
+    await pool.query(`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS ${col}`)
+      .catch(e => console.warn(`[db] ${col} migration skipped:`, e.message));
+  }
+
 }
 
 // ─── Slug availability (used by generateSlug) ────────────────────────────────
