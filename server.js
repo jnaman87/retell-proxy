@@ -2347,7 +2347,7 @@ async function transitionToWarm(contactId) {
       return;
     }
 
-    if (['completed', 'unsubscribed', 'bounced'].includes(status)) {
+    if (['completed', 'unsubscribed', 'bounced', 'handoff'].includes(status)) {
       console.log(`[warm] Contact ${contactId} is "${status}" — skipping warm transition`);
       await client.query('ROLLBACK');
       return;
@@ -2404,7 +2404,7 @@ async function transitionToUltraWarm(contactId) {
       return false;
     }
 
-    if (['completed', 'unsubscribed', 'bounced', 'stopped'].includes(status)) {
+    if (['completed', 'unsubscribed', 'bounced', 'stopped', 'handoff'].includes(status)) {
       console.log(`[ultra_warm] Contact ${contactId} is "${status}" — skipping`);
       await client.query('ROLLBACK');
       return false;
