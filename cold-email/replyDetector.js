@@ -167,7 +167,7 @@ async function handlePositive(enrollment, msg) {
   // Store reply in history, mark positive_reply_at — do NOT build demo yet
   const updatedHistory = [
     ...(Array.isArray(enrollment.conversation_history) ? enrollment.conversation_history : []),
-    { role: 'prospect', content: 'Subject: ' + msg.subject + '\n' + msg.snippet,
+    { role: 'prospect', content: msg.body,
       timestamp: new Date().toISOString(), phase: 'cold', msgId: msg.id }
   ];
   await pool.query(
@@ -181,7 +181,7 @@ async function handlePositive(enrollment, msg) {
   // CRM — tag + move to Reply Received (not Demo Sent)
   await tagContact(contact_id, 'aivoice_reply_received');
   await addNote(contact_id,
-    `Positive reply to cold email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply:\n${msg.snippet}`
+    `Positive reply to cold email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply:\n${msg.body}`
   );
   const otOpp = await findOpportunity(contact_id, OT_PIPELINE);
   if (otOpp) await moveOpportunity(otOpp.id, OT_REPLY_RECEIVED);
@@ -205,7 +205,7 @@ async function handleNegative(enrollment, msg, isUnsub) {
 
   await addNote(
     contact_id,
-    `${isUnsub ? 'Unsubscribed' : 'Not interested'} reply to ${phase} email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply preview:\n${msg.snippet}`
+    `${isUnsub ? 'Unsubscribed' : 'Not interested'} reply to ${phase} email.\nFrom: ${msg.from}\nSubject: ${msg.subject}\n\nReply:\n${msg.body}`
   );
 
   if (phase === 'cold') {
@@ -228,16 +228,28 @@ async function detectRepliesAndBounces() {
 
     for (const { email } of mailboxes) {
       try {
-        const messages = await listRecentInbound(email, { days: 3, max: 50 });
+        const all = await listRecentInbound(email, { days: 3, max: 50 });
+
+        // Bounces are handled per message. For real replies, keep only the newest
+        // message per thread: the AI reads the full thread, so it answers every
+        // unanswered message at once instead of once per message.
+        const newestByThread = new Map();
+        for (const m of all) {
+          if (m.bounced) continue;
+          const prev = newestByThread.get(m.threadId);
+          if (!prev || (m.internalDate || 0) > (prev.internalDate || 0)) newestByThread.set(m.threadId, m);
+        }
+        const messages = all.filter(m => m.bounced || newestByThread.get(m.threadId) === m);
 
         for (const msg of messages) {
+          msg.body = msg.body || msg.snippet || '';
           // Bounce detection
           if (msg.bounced) {
             const result = await pool.query(
               `UPDATE enrollments
  SET status = 'bounced'
  WHERE thread_id = $1
-   AND status NOT IN ('unsubscribed', 'bounced', 'completed', 'booked')
+   AND status NOT IN ('unsubscribed', 'bounced', 'stopped', 'handoff')
  RETURNING contact_id, prospect_email`,
               [msg.threadId]
             );
@@ -283,25 +295,28 @@ Email DND enabled.`
           const { rows: enr } = await pool.query(
             `SELECT * FROM enrollments
  WHERE thread_id = $1
-   AND status NOT IN ('unsubscribed', 'bounced', 'completed', 'booked')
+   AND status NOT IN ('unsubscribed', 'bounced', 'stopped', 'handoff')
  LIMIT 1`,
             [msg.threadId]
           );
           if (!enr.length) continue;
           let enrollment = enr[0];
 
+const msgTsClaim = msg.internalDate || Date.now();
 const claim = await pool.query(
   `UPDATE enrollments
-      SET last_inbound_message_id = $1
+      SET last_inbound_message_id = $1,
+          last_inbound_at = $3
     WHERE id = $2
-      AND (last_inbound_message_id IS DISTINCT FROM $1)
+      AND last_inbound_message_id IS DISTINCT FROM $1
+      AND (last_inbound_at IS NULL OR last_inbound_at < $3)
     RETURNING *`,
-  [msg.id, enrollment.id]
+  [msg.id, enrollment.id, msgTsClaim]
 );
 
 if (!claim.rows.length) {
   console.log(
-    `[detect] ${enrollment.prospect_email} -- inbound message ${msg.id} already processed, skipping`
+    `[detect] ${enrollment.prospect_email} -- inbound message ${msg.id} already processed or older than the last one, skipping`
   );
   continue;
 }
@@ -316,15 +331,23 @@ if (msgTs && enrolledTs && msgTs < enrolledTs) {
           // Dedup: skip if this Gmail message was already processed
           const processedIds = new Set((enrollment.conversation_history || []).filter(h => h.role === 'prospect' && h.msgId).map(h => h.msgId));
 const lastProspect = (enrollment.conversation_history || []).slice().reverse().find(h => h.role === 'prospect');
-const currentContent = 'Subject: ' + msg.subject + '\n' + msg.snippet;
+const currentContent = 'Subject: ' + msg.subject + '\n' + msg.body;
 if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === currentContent)) {
   console.log('[detect] ' + enrollment.prospect_email + ' -- duplicate message, skipping');
   continue;
 }
 
+          // Booked leads belong to Naman: honour opt-outs, otherwise hand straight to him.
+          if (enrollment.status === 'booked') {
+            const intent = await classifyReply(msg.subject, msg.body);
+            if (intent === 'unsubscribe') await handleNegative(enrollment, msg, true);
+            else await handleConversationalReply(enrollment, msg);
+            continue;
+          }
+
           // Warm / ultra_warm: classify first, route to negative handler or conversational AI
           if (enrollment.phase === 'warm' || enrollment.phase === 'ultra_warm') {
-            const intent = await classifyReply(msg.subject, msg.snippet);
+            const intent = await classifyReply(msg.subject, msg.body);
             console.log(`[detect] ${enrollment.prospect_email} ${enrollment.phase} reply classified: ${intent}`);
             if (intent === 'negative' || intent === 'unsubscribe') {
   await handleNegative(enrollment, msg, intent === 'unsubscribe');
@@ -336,7 +359,7 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
           }
 
           // Cold: classify and route
-          const intent = await classifyReply(msg.subject, msg.snippet);
+          const intent = await classifyReply(msg.subject, msg.body);
           console.log(`[detect] ${enrollment.prospect_email} cold reply classified: ${intent}`);
 
           if (intent === 'unsubscribe') {
