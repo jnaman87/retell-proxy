@@ -652,7 +652,10 @@ await pool.query(
       `SELECT * FROM enrollments
        WHERE conv_status = 'calendar_sent'
          AND conv_followup_at <= NOW()
-         AND status NOT IN ('unsubscribed', 'bounced', 'completed')
+                  AND status = 'active'
+         AND (last_conv_at IS NULL OR last_conv_at < NOW() - INTERVAL '2 days')
+         AND (last_sent_at IS NULL OR last_sent_at < NOW() - INTERVAL '2 days')
+         AND (next_send_at IS NULL OR next_send_at > NOW() + INTERVAL '2 days')
        LIMIT 3`
     );
     for (const enrollment of convDue.rows) {
