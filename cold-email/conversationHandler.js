@@ -2,7 +2,7 @@
 
 const pool = require('./pool');
 const { sendEmail, getThreadTranscript } = require('./gmail-sender');
-const { runPipeline } = require('./aiPipeline');
+const { runPipeline, draftDemoReply } = require('./aiPipeline');
 const { buildDemoForEnrollment } = require('./demoBuilder');
 
 const {
@@ -456,7 +456,7 @@ async function handleConversationalReply(enrollment, msg) {
       return;
     }
 
-    const result = await runPipeline({
+    const ctx = {
       phase: enrollment.phase || 'cold',
       persona,
       prospectName: enrollment.prospect_name,
@@ -467,7 +467,8 @@ async function handleConversationalReply(enrollment, msg) {
       calendarLink: CALENDAR_LINK,
       transcript,
       latestText
-    });
+    };
+    const result = await runPipeline(ctx);
 
     if (result.action === 'negative') {
       await handleNegativeReply(enrollment, msg, latestText);
@@ -509,9 +510,19 @@ async function handleConversationalReply(enrollment, msg) {
         });
         return;
       }
-      replyText =
-        'Here it is, built for ' + (enrollment.company_name || 'your business') + ': ' + demoUrl +
-        '\n\nYou can call Emma straight from the page and hear how she handles your calls.';
+      // Let the AI share the link AND answer anything else they asked (e.g. price).
+      // If no draft passes review, fall back to the standard demo email.
+      let drafted = null;
+      try {
+        drafted = await draftDemoReply(ctx, demoUrl);
+      } catch (e) {
+        console.error('[conv] demo reply draft failed for ' + enrollment.prospect_email + ':', e.message);
+      }
+      replyText = drafted
+        ? drafted.text
+        : 'Here it is, built for ' + (enrollment.company_name || 'your business') + ': ' + demoUrl +
+          '\n\nYou can call Emma straight from the page and hear how she handles your calls.';
+      result.score = drafted ? drafted.score : null;
     } else {
       replyText = result.text;
     }
