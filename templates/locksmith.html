@@ -540,7 +540,27 @@ if (!window.RetellWebClient) {
           client.on('agent_stop_talking',   function () { setCallState('listening', 'Listening…'); });
           client.on('call_ended',           function () { finishCall('Call ended.'); });
           client.on('error',                function () { finishCall('The call could not be completed.'); });
-          await client.startCall({ accessToken: accessToken });
+          // v3: the browser joins the call our server created, through Retell's gateway.
+          // The gateway no longer sends "agent talking" events, so we read Emma's audio level instead.
+          client.on('call_ready', function () {
+            var talking = false, lastLoud = 0;
+            var meter = window.setInterval(function () {
+              if (!isCalling || !client || !client.analyzerComponent) { window.clearInterval(meter); return; }
+              if (client.analyzerComponent.calculateVolume() > 0.02) lastLoud = Date.now();
+              var nowTalking = Date.now() - lastLoud < 600;
+              if (nowTalking !== talking) {
+                talking = nowTalking;
+                setCallState(talking ? 'speaking' : 'listening', talking ? 'Emma is speaking…' : 'Listening…');
+              }
+            }, 150);
+          });
+          await client.startCall({
+            accessToken: accessToken,
+            callId: payload.callId,
+            transport: payload.transport || 'gateway',
+            iceServers: payload.iceServers,
+            emitRawAudioSamples: true
+          });
         } catch (error) { console.error('Call error:', error); finishCall('Unable to connect right now. Please try again.'); }
       }
       callButton.addEventListener('click', toggleCall);
