@@ -1231,7 +1231,7 @@ app.post('/create-web-call', async (req, res) => {
   try {
     const body = { agent_id: agentId, metadata };
     console.log('[create-web-call] Payload:', JSON.stringify(body, null, 2));
-    const retellRes = await fetch(`${RETELL}/v2/create-web-call`, {
+    const retellRes = await fetch(`${RETELL}/v3/create-web-call`, {
       method  : 'POST',
       headers : {
         Authorization  : `Bearer ${RETELL_API_KEY}`,
@@ -1251,6 +1251,8 @@ app.post('/create-web-call', async (req, res) => {
       success     : true,
       accessToken : data.access_token,
       callId      : data.call_id,
+      transport   : data.transport,
+      iceServers  : data.ice_servers,
     });
   } catch (e) {
     await db.releaseCall(agentId).catch(() => {});
