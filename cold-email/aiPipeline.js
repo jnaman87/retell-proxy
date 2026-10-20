@@ -21,8 +21,10 @@ const MAX_ATTEMPTS    = Number(process.env.AI_MAX_ATTEMPTS || 3);
 const MAX_WORDS       = 70;
 
 const CALENDAR_TOKEN = '{{CALENDAR_LINK}}';
+const DEMO_TOKEN     = '{{DEMO_LINK}}';
 
-// The only facts the AI may state. Anything outside this list goes to Naman.
+// The only facts the AI may state. Questions outside them are answered by
+// pointing to the call with Naman, not by guessing.
 const FACTS = [
   'Creative Copyz builds custom AI voice receptionists for service businesses.',
   'The receptionist answers calls 24/7, handles after-hours questions, captures caller details, and can book jobs.',
@@ -31,6 +33,8 @@ const FACTS = [
   'Each demo page stays live for 7 days and allows up to 5 test calls.',
   'Next step for an interested prospect is an onboarding call with Naman, booked through the calendar link.',
   'Naman is the technical director at Creative Copyz. On the onboarding call he can answer any questions they have.',
+  'Pricing is custom: the monthly cost depends on what we build for each business, such as call volume and what it connects to. Exact numbers are worked out with Naman.',
+  'There is no setup fee. Phone carrier charges for the calls themselves are billed separately from the monthly cost.',
 ];
 
 const BANNED_PHRASES = [
@@ -90,15 +94,20 @@ function factsBlock(ctx) {
   return [
     ...FACTS,
     `Prospect company: ${ctx.companyName || 'unknown'}${ctx.city ? ', ' + ctx.city : ''}.`,
-    ctx.demoUrl
-      ? `The prospect has ALREADY been sent their demo page: ${ctx.demoUrl}. Never offer to send a demo again.`
-      : 'No demo page has been sent yet.',
+    ctx.sendingDemo
+      ? `Their personalised demo page has just been built and is being shared in THIS reply. Put the placeholder ${DEMO_TOKEN} where the link goes.`
+      : ctx.demoUrl
+        ? `The prospect has ALREADY been sent their demo page: ${ctx.demoUrl}. Never offer to send a demo again.`
+        : 'No demo page has been sent yet.',
     ctx.demoTested ? 'The prospect HAS already tested the demo by calling Emma.' : 'The prospect has not tested the demo yet (as far as we know).',
     `The calendar link has been sent ${ctx.calendarLinksSent} time(s) in this thread.`,
   ].map(f => '- ' + f).join('\n');
 }
 
 function phaseGoal(phase, ctx = {}) {
+  if (ctx.sendingDemo) {
+    return 'Share their demo page and invite them to call Emma on it. Also answer any question in their message in one short line.';
+  }
   if (ctx.demoUrl && !ctx.demoTested) {
     return 'They already have their demo page. Get them to test it by calling Emma on the page shared earlier in this thread. Never offer to send another demo.';
   }
@@ -113,23 +122,26 @@ const ROUTER_SYSTEM = `You triage replies in a sales email thread for Creative C
 Read the WHOLE thread, then decide what happens with the prospect's newest message.
 
 Decisions:
-- "handoff": a human (Naman, the technical director) must take over. Choose this when ANY of these are true:
+- "reply": the default. Use it whenever a short, honest reply can move things forward, including:
+  * questions about how it works (answer from the FACTS)
+  * a FIRST question about price or monthly cost: we reply that pricing is custom to what we build, with no setup fee
+  * questions outside the FACTS: we reply that Naman can cover it on a quick call
+  * a prospect who wants the demo, even if their message also asks a question
+- "handoff": a human (Naman, the technical director) must take over. Only for these edge cases:
   * they ask for a phone call, ask to be called or texted, or share a phone number
-  * they ask about pricing, cost, packages, contracts, terms, discounts, or payment
+  * they PUSH on pricing: they ask for numbers again after we already said pricing is custom, or they ask about contracts, discounts or payment terms
   * they propose a specific day or time, or ask us to pick a time (we cannot book on their behalf)
-  * they say they want to buy, sign up, or move forward, and the calendar link has already been sent at least once
-  * they ask something that cannot be answered from the FACTS list
-  * they seem confused, frustrated, annoyed, or are correcting us
-  * the thread already looks repetitive or confusing from their side
-  * a wrong or generic reply could cost us this deal
-- "reply": a short automated reply can genuinely move things forward using only the FACTS list.
+  * they say they want to buy or sign up, and the calendar link has already been sent at least once
+  * they ask to speak to a person or to Naman
+  * they are frustrated, annoyed, or say we got something wrong
+  * the thread is clearly going in circles and another automated reply would make it worse
 - "no_reply": nothing needs answering (e.g. "thanks", "ok", "got it" when nothing is pending, out-of-office or auto-replies).
 - "negative": they are not interested, ask to stop, unsubscribe, or are hostile.
 
-When unsure between "reply" and "handoff", choose "handoff".
+Handoff is for the edge cases above only. When unsure, choose "reply".
 
 Also return:
-- "wants_demo": true ONLY if the demo has not been sent yet and they explicitly agree to receive or see it.
+- "wants_demo": true if the demo has not been sent yet and they agree to see it or ask how it works after being offered it ("yes", "show me", "send it", "how does it work?"), even if the same message asks about price.
 - "calendar_link_ok": true only if sharing the booking link is the right next step AND it has not been sent yet, or they explicitly asked for it.
 
 Respond ONLY with JSON:
@@ -152,7 +164,7 @@ async function routeMessage(ctx) {
   const out = await chatJSON({ system: ROUTER_SYSTEM, user });
   const valid = ['reply', 'handoff', 'no_reply', 'negative'];
   return {
-    decision        : valid.includes(out.decision) ? out.decision : 'handoff',
+    decision        : valid.includes(out.decision) ? out.decision : 'reply',
     reason          : String(out.reason || ''),
     summary         : String(out.summary || ''),
     wantsDemo       : out.wants_demo === true && !ctx.demoUrl,
@@ -176,12 +188,14 @@ HOW TO WRITE:
 - Never repeat something already said in the thread (offers, links, explanations) unless they asked for it.
 - If their demo page was already sent, never offer to send a demo or a demo link. If they have not tested it yet, point them back to the demo page shared earlier in this thread and invite them to call Emma there.
 - Only state things from the FACTS list. Never invent prices, features, timelines, integrations, or promises.
+- If they ask about price: say pricing is custom to what we build for them, there is no setup fee, and Naman can walk them through exact numbers. Never give a number.
+- If they ask something the FACTS don't cover: say Naman can cover that on a quick call, never guess.
 - Any call is with Naman, never with you. When inviting them to a call, introduce him as our technical director who can answer any questions they have, for example: "a quick call with Naman, our technical director, so he can answer any questions you have".
 - Never use em dashes.
 - No sign-off, name, or signature. The application adds it.
-${allowCalendar
+${ctx.sendingDemo ? `- Include the placeholder ${DEMO_TOKEN} exactly once, where their demo page link goes.\n` : ''}${allowCalendar
   ? `- If inviting them to book, write the placeholder ${CALENDAR_TOKEN} where the booking link goes.`
-  : '- Do not include any links. Do not include the booking link.'}
+  : '- Do not include any other links. Do not include the booking link.'}
 
 FACTS:
 ${factsBlock(ctx)}
@@ -230,7 +244,11 @@ function guardIssues(draft, ctx, allowCalendar) {
   }
   if (/https?:\/\//i.test(text)) issues.push('Contains a raw link. Links are not allowed in this reply.');
   if (text.includes(CALENDAR_TOKEN) && !allowCalendar) issues.push('Includes the booking link when it is not allowed.');
-  if (ctx.demoUrl && (
+  if (ctx.sendingDemo && text.split(DEMO_TOKEN).length - 1 !== 1) {
+    issues.push(`Must include the placeholder ${DEMO_TOKEN} exactly once for their demo page.`);
+  }
+  if (!ctx.sendingDemo && text.includes(DEMO_TOKEN)) issues.push('Includes a demo link placeholder when no demo is being sent.');
+  if (ctx.demoUrl && !ctx.sendingDemo && (
     /\b(send|share|get|build|create|set up|prepare)\b.{0,40}\b(a|another|the|your|you)?\s*(tailored|personali[sz]ed|custom|new)?\s*(demo|demo link|demo page)\b/i.test(text) ||
     /\b(would you like|do you want|want me to|shall i|should i|i can)\b.{0,40}\bdemo\b/i.test(text)
   )) {
@@ -251,8 +269,10 @@ Score it 0 to 100 for how confident you are that sending it is the right move. S
 - Longer than needed for what they wrote: -15
 - Contradicts or ignores something earlier in the thread: -30
 - Could confuse the prospect: -30
-Also set "should_handoff" to true if this situation really needs a human (pricing, phone call request,
-scheduling a specific time, confusion, or a question outside the FACTS), regardless of the draft quality.
+A first question about price is answered with "pricing is custom, no setup fee, Naman covers exact numbers": that is correct, not a problem.
+Set "should_handoff" to true ONLY for these edge cases: they asked for a phone call or shared a number, they pushed for
+price numbers after already being told pricing is custom, they proposed a specific time, they want to buy after already
+getting the booking link, they asked for a person, or they are frustrated. Otherwise false.
 
 Respond ONLY with JSON: {"score":0,"issues":["specific problem", "..."],"should_handoff":false}`;
 
@@ -300,11 +320,15 @@ async function runPipeline(ctx) {
   if (route.decision === 'handoff') {
     return { action: 'handoff', reason: route.reason, summary: route.summary, attempts: [] };
   }
-  if (ctx.phase === 'cold' && route.wantsDemo) {
+  if (!ctx.demoUrl && route.wantsDemo) {
     return { action: 'send_demo', reason: route.reason, summary: route.summary };
   }
 
-  const allowCalendar = route.calendarLinkOk;
+  return draftLoop(ctx, { allowCalendar: route.calendarLinkOk, summary: route.summary, reason: route.reason });
+}
+
+// Drafter -> guards -> critic, up to MAX_ATTEMPTS.
+async function draftLoop(ctx, { allowCalendar = false, summary = '', reason = '', ignoreHandoff = false } = {}) {
   const attempts = [];
   let feedback = null;
 
@@ -337,24 +361,24 @@ async function runPipeline(ctx) {
     console.log(`[ai] attempt ${i} score ${review.score}${review.shouldHandoff ? ' (critic wants handoff)' : ''}`);
     attempts.push({ attempt: i, draft, score: review.score, issues: review.issues });
 
-    if (review.shouldHandoff) {
+    if (review.shouldHandoff && !ignoreHandoff) {
       return {
         action : 'handoff',
-        reason : `Reviewer flagged this for a human: ${review.issues.join('; ') || route.reason}`,
-        summary: route.summary,
+        reason : `Reviewer flagged this for a human: ${review.issues.join('; ') || reason}`,
+        summary,
         attempts,
       };
     }
     if (review.score >= SCORE_THRESHOLD) {
-      const text = allowCalendar
-        ? draft.split(CALENDAR_TOKEN).join(ctx.calendarLink)
-        : draft;
+      let text = draft;
+      if (allowCalendar) text = text.split(CALENDAR_TOKEN).join(ctx.calendarLink);
+      if (ctx.sendingDemo) text = text.split(DEMO_TOKEN).join(ctx.newDemoUrl);
       return {
-        action        : 'reply',
+        action          : 'reply',
         text,
-        score         : review.score,
+        score           : review.score,
         includesCalendar: allowCalendar && draft.includes(CALENDAR_TOKEN),
-        summary       : route.summary,
+        summary,
         attempts,
       };
     }
@@ -364,13 +388,24 @@ async function runPipeline(ctx) {
   return {
     action : 'handoff',
     reason : `No draft reached a score of ${SCORE_THRESHOLD} in ${MAX_ATTEMPTS} attempts.`,
-    summary: route.summary,
+    summary,
     attempts,
   };
 }
 
+// The reply that shares a freshly built demo, also answering anything else
+// they asked (e.g. price). Returns null if no draft passes; the caller then
+// sends the standard demo email instead.
+async function draftDemoReply(ctx, newDemoUrl) {
+  ctx.calendarLinksSent = countCalendarLinksSent(ctx.transcript, ctx.calendarLink);
+  const demoCtx = { ...ctx, sendingDemo: true, newDemoUrl, demoUrl: null };
+  const result = await draftLoop(demoCtx, { allowCalendar: false, ignoreHandoff: true });
+  return result.action === 'reply' ? result : null;
+}
+
 module.exports = {
   runPipeline,
+  draftDemoReply,
   // exported for tests
-  guardIssues, renderTranscript, countCalendarLinksSent, CALENDAR_TOKEN, SCORE_THRESHOLD, MAX_ATTEMPTS,
+  guardIssues, renderTranscript, countCalendarLinksSent, CALENDAR_TOKEN, DEMO_TOKEN, SCORE_THRESHOLD, MAX_ATTEMPTS,
 };
