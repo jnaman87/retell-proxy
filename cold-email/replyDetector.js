@@ -9,6 +9,7 @@ const {
   moveOpportunity,
   createConversionOpportunity,
   OT_PIPELINE,
+  OT_BOUNCED,
   OT_REPLY_RECEIVED,
   OT_UNSUBSCRIBED,
   OT_NO_REPLIES,
