@@ -22,7 +22,8 @@ const { google } = require('googleapis');
 const db       = require('./db');
 // ── Cold email ───────────────────────────────────────────────────────────────
 const { runSendLoop } = require('./cold-email/sendLoop');
-const { detectRepliesAndBounces } = require('./cold-email/replyDetector');
+const { detectRepliesAndBounces, detectorStatus } = require('./cold-email/replyDetector');
+const { searchMessages } = require('./cold-email/gmail-sender');
 const pool = require('./cold-email/pool');
 const resolveTimezone = require('./routes/enroll').resolveTimezone; // see below
 
@@ -2131,8 +2132,10 @@ if (!crmCompanyName && contactId) {
 
 
 let _detectInProgress = false;
+let lastGmailPushAt = null;
 app.post('/gmail-webhook', express.json(), async (req, res) => {
   res.sendStatus(200);
+  lastGmailPushAt = new Date().toISOString();
   if (_detectInProgress) return; // skip if already running
   _detectInProgress = true;
   try {
@@ -2262,6 +2265,132 @@ if (!enrollment) {
   } catch (err) {
     console.error('[retell-webhook] Unhandled error:', err);
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /admin/reply-audit?token=<AUDIT_TOKEN>&days=14
+// Read-only. Searches every mailbox (spam included) for recent emails from other
+// people and checks each against what the reply detector actually processed.
+// Changes nothing, sends nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/admin/reply-audit', async (req, res) => {
+  if (!process.env.AUDIT_TOKEN || req.query.token !== process.env.AUDIT_TOKEN) {
+    return res.status(403).json({ error: 'Set AUDIT_TOKEN in Railway and pass ?token=<that value>' });
+  }
+  const days = Math.min(30, Math.max(1, Number(req.query.days) || 14));
+  const now = Date.now();
+  const SKIP_STATUSES = ['unsubscribed', 'bounced', 'stopped', 'handoff'];
+  const emailOf = from => {
+    const m = String(from || '').match(/<([^>]+)>/);
+    return (m ? m[1] : String(from || '')).trim().toLowerCase();
+  };
+
+  const only = String(req.query.mailbox || '').trim().toLowerCase();
+  const { rows: allMailboxes } = await pool.query('SELECT email FROM mailboxes ORDER BY email');
+  const mailboxes = only ? allMailboxes.filter(m => m.email.toLowerCase() === only) : allMailboxes;
+  const perMailbox = [];
+  const missed = [];
+  const totals = { handled: 0, missed: 0, skippedByStatus: 0, bounces: 0, bouncesMissed: 0, notProspects: 0, errors: 0 };
+
+  // All mailboxes are scanned at the same time.
+  await Promise.all(mailboxes.map(async ({ email: mailbox }) => {
+    const row = { mailbox, scanned: 0, handled: 0, missed: 0, skippedByStatus: 0, bounces: 0, notProspects: 0, inboxLast3Days: 0, error: null };
+    try {
+      const { messages } = await searchMessages(
+        mailbox,
+        `in:anywhere newer_than:${days}d -from:me -in:sent -in:drafts`,
+        { maxTotal: 500 }
+      );
+      row.scanned = messages.length;
+
+      const threadIds = [...new Set(messages.map(m => m.threadId).filter(Boolean))];
+      const senders = [...new Set(messages.map(m => emailOf(m.from)).filter(Boolean))];
+      const { rows: byThread } = await pool.query(
+        `SELECT id, thread_id, prospect_email, company_name, status, phase,
+                last_inbound_message_id, last_inbound_at, conversation_history
+           FROM enrollments WHERE thread_id = ANY($1::text[])`, [threadIds]);
+      const { rows: byEmail } = await pool.query(
+        `SELECT id, prospect_email, company_name, status, phase, thread_id, mailbox
+           FROM enrollments WHERE lower(prospect_email) = ANY($1::text[])`, [senders]);
+      const threadMap = new Map(byThread.map(e => [e.thread_id, e]));
+      const emailMap = new Map(byEmail.map(e => [e.prospect_email.toLowerCase(), e]));
+
+      for (const m of messages) {
+        if (m.error) { totals.errors++; continue; }
+        const from = emailOf(m.from);
+        const ageDays = m.internalDate ? (now - m.internalDate) / 86400000 : null;
+        if ((m.labels || []).includes('INBOX') && ageDays !== null && ageDays <= 3) row.inboxLast3Days++;
+
+        if (/mailer-daemon|postmaster/.test(from)) {
+          row.bounces++; totals.bounces++;
+          const e = threadMap.get(m.threadId);
+          if (e && e.status !== 'bounced') {
+            totals.bouncesMissed++;
+            missed.push({ type: 'bounce not recorded', mailbox, prospect: e.prospect_email, enrollmentId: e.id, status: e.status, date: new Date(m.internalDate).toISOString(), subject: m.subject });
+          }
+          continue;
+        }
+
+        const e = threadMap.get(m.threadId);
+        if (!e) {
+          const byAddr = emailMap.get(from);
+          if (byAddr) {
+            row.missed++; totals.missed++;
+            missed.push({
+              type: 'reply started a NEW thread (detector only matches the original thread)',
+              mailbox, from, enrollmentId: byAddr.id, company: byAddr.company_name, status: byAddr.status,
+              phase: byAddr.phase, date: new Date(m.internalDate).toISOString(), subject: m.subject, preview: m.snippet,
+            });
+          } else {
+            row.notProspects++; totals.notProspects++;
+          }
+          continue;
+        }
+
+        const history = Array.isArray(e.conversation_history) ? e.conversation_history : [];
+        const processed =
+          e.last_inbound_message_id === m.id ||
+          (e.last_inbound_at && m.internalDate && Number(e.last_inbound_at) >= m.internalDate) ||
+          history.some(h => h && h.msgId === m.id);
+
+        if (processed) { row.handled++; totals.handled++; continue; }
+        if (SKIP_STATUSES.includes(e.status)) { row.skippedByStatus++; totals.skippedByStatus++; continue; }
+
+        const labels = m.labels || [];
+        let type = 'MISSED';
+        if (labels.includes('SPAM')) type = 'MISSED: reply is in the Spam folder';
+        else if (labels.includes('TRASH')) type = 'MISSED: reply is in Trash';
+        else if (!labels.includes('INBOX')) type = 'MISSED: reply was archived or filtered out of the inbox';
+        else if (ageDays !== null && ageDays > 3) type = 'MISSED: older than the 3-day scan window';
+        else type = 'MISSED: in the inbox and recent, but not processed';
+
+        row.missed++; totals.missed++;
+        missed.push({
+          type, mailbox, from, enrollmentId: e.id, company: e.company_name, status: e.status, phase: e.phase,
+          date: new Date(m.internalDate).toISOString(), subject: m.subject, preview: m.snippet, labels,
+        });
+      }
+    } catch (err) {
+      row.error = err.message; totals.errors++;
+    }
+    if (row.inboxLast3Days > 50) {
+      row.warning = `Inbox has ${row.inboxLast3Days} emails from the last 3 days, but the detector only reads the newest 50. Older replies are skipped.`;
+    }
+    perMailbox.push(row);
+  }));
+  perMailbox.sort((a, b) => a.mailbox.localeCompare(b.mailbox));
+  missed.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  res.json({
+    checkedDays: days,
+    verdict: totals.missed || totals.bouncesMissed
+      ? `${totals.missed} reply(ies) and ${totals.bouncesMissed} bounce(s) were NOT processed. See "missed".`
+      : 'Every reply from a prospect in this period was processed.',
+    detector: { ...detectorStatus, lastGmailPushAt },
+    totals,
+    missed,
+    perMailbox,
+  });
 });
 
 // ─── 404 catch-all ────────────────────────────────────────────────────────────
