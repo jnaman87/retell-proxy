@@ -276,7 +276,52 @@ async function verifyAll(mailboxes) {
   return results;
 }
 
+// Read-only search used by the reply audit. Pages through results and returns
+// sender, subject, labels and a preview for every matching message.
+async function searchMessages(mailbox, query, { maxTotal = 500 } = {}) {
+  const ids = [];
+  let pageToken = '';
+  do {
+    const q = encodeURIComponent(query);
+    const page = await gmailFetch(
+      mailbox,
+      `/messages?q=${q}&maxResults=100${pageToken ? `&pageToken=${pageToken}` : ''}`
+    );
+    for (const m of page.messages || []) ids.push(m.id);
+    pageToken = page.nextPageToken || '';
+  } while (pageToken && ids.length < maxTotal);
+
+  // Fetch details 10 at a time to keep the scan quick.
+  const out = [];
+  const list = ids.slice(0, maxTotal);
+  for (let i = 0; i < list.length; i += 10) {
+    const chunk = await Promise.all(list.slice(i, i + 10).map(async id => {
+      try {
+        const msg = await gmailFetch(
+          mailbox,
+          `/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`
+        );
+        const get = headerGetter(msg);
+        return {
+          id          : msg.id,
+          threadId    : msg.threadId,
+          from        : get('from'),
+          subject     : get('subject'),
+          snippet     : msg.snippet || '',
+          labels      : msg.labelIds || [],
+          internalDate: msg.internalDate ? Number(msg.internalDate) : null,
+        };
+      } catch (e) {
+        return { id, error: e.message };
+      }
+    }));
+    out.push(...chunk);
+  }
+  return { total: ids.length, messages: out };
+}
+
 module.exports = {
+  searchMessages,
   sendEmail, listRecentInbound, getThreadTranscript, verifyMailbox, verifyAll,
   // exported for tests
   extractText, stripQuoted, htmlToText,
