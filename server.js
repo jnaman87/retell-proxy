@@ -2290,7 +2290,7 @@ app.get('/admin/reply-audit', async (req, res) => {
   const mailboxes = only ? allMailboxes.filter(m => m.email.toLowerCase() === only) : allMailboxes;
   const perMailbox = [];
   const missed = [];
-  const totals = { handled: 0, missed: 0, skippedByStatus: 0, bounces: 0, bouncesMissed: 0, notProspects: 0, errors: 0 };
+  const totals = { handled: 0, missed: 0, skippedByStatus: 0, autoReplies: 0, bounces: 0, bouncesMissed: 0, notProspects: 0, errors: 0 };
 
   // All mailboxes are scanned at the same time.
   await Promise.all(mailboxes.map(async ({ email: mailbox }) => {
@@ -2310,7 +2310,8 @@ app.get('/admin/reply-audit', async (req, res) => {
                 last_inbound_message_id, last_inbound_at, conversation_history
            FROM enrollments WHERE thread_id = ANY($1::text[])`, [threadIds]);
       const { rows: byEmail } = await pool.query(
-        `SELECT id, prospect_email, company_name, status, phase, thread_id, mailbox
+        `SELECT id, prospect_email, company_name, status, phase, thread_id, mailbox,
+                last_inbound_message_id, last_inbound_at
            FROM enrollments WHERE lower(prospect_email) = ANY($1::text[])`, [senders]);
       const threadMap = new Map(byThread.map(e => [e.thread_id, e]));
       const emailMap = new Map(byEmail.map(e => [e.prospect_email.toLowerCase(), e]));
@@ -2332,8 +2333,13 @@ app.get('/admin/reply-audit', async (req, res) => {
         }
 
         const e = threadMap.get(m.threadId);
+        const byAddr = !e ? emailMap.get(from) : null;
+        if ((e || byAddr) && m.autoReply) { totals.autoReplies++; continue; }
         if (!e) {
-          const byAddr = emailMap.get(from);
+          const wasProcessed = byAddr && (byAddr.last_inbound_message_id === m.id ||
+            (byAddr.last_inbound_at && m.internalDate && Number(byAddr.last_inbound_at) >= m.internalDate));
+          if (byAddr && wasProcessed) { row.handled++; totals.handled++; continue; }
+          if (byAddr && SKIP_STATUSES.includes(byAddr.status)) { row.skippedByStatus++; totals.skippedByStatus++; continue; }
           if (byAddr) {
             row.missed++; totals.missed++;
             missed.push({
