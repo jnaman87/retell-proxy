@@ -322,8 +322,11 @@ function appendHistory(enrollment, entries) {
 }
 
 function replySubject(msg, transcript) {
-  const subject = (msg && msg.subject) ||
-    (transcript.length && transcript[transcript.length - 1].subject) || 'our conversation';
+  // A prospect who started a new email is answered in our original thread,
+  // which needs the original subject.
+  const threadSubject = transcript.length ? (transcript.find(m => m.subject) || {}).subject : '';
+  const subject = (msg && msg.matchedEnrollmentId ? threadSubject : msg && msg.subject) ||
+    threadSubject || 'our conversation';
   return subject.startsWith('Re:') ? subject : 'Re: ' + subject;
 }
 
