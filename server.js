@@ -2379,8 +2379,8 @@ app.get('/admin/reply-audit', async (req, res) => {
     } catch (err) {
       row.error = err.message; totals.errors++;
     }
-    if (row.inboxLast3Days > 50) {
-      row.warning = `Inbox has ${row.inboxLast3Days} emails from the last 3 days, but the detector only reads the newest 50. Older replies are skipped.`;
+        if (row.inboxLast3Days > 500) {
+      row.warning = `Inbox has ${row.inboxLast3Days} emails from the last 3 days, but the detector only reads the newest 500. Older replies are skipped.`;
     }
     perMailbox.push(row);
   }));
