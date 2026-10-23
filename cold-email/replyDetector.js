@@ -1,7 +1,7 @@
 'use strict';
 
 const pool = require('./pool');
-const { listRecentInbound } = require('./gmail-sender');
+const { listInboxIds, getSender, getInboundMessage } = require('./gmail-sender');
 const { handleConversationalReply } = require('./conversationHandler');
 
 const {
@@ -225,6 +225,168 @@ async function handleNegative(enrollment, msg, isUnsub) {
 // Last run times, shown on the reply audit page.
 const detectorStatus = { lastStartedAt: null, lastFinishedAt: null, lastError: null };
 
+// Sorts an auto-reply into one of three GHL tags.
+function autoReplyKind(msg) {
+  const text = `${msg.subject || ''}\n${msg.body || msg.snippet || ''}`.toLowerCase();
+  if (/permanently closed|no longer in business|out of business|ceased (operations|trading)|(has|have) (permanently )?closed (its|our) doors|(clinic|business|office|company|shop) (is|has) (now )?(permanently )?closed|closed (for good|permanently)/.test(text)) {
+    return 'closed';
+  }
+  if (/no longer (with|at|employed|working|works)|(has|have) left (the|our) (company|business|team)|no longer (active|monitored|in use|checked)|(not|isn't|is not) (being )?monitored|email (address )?(has )?changed|new (email|e-mail) address|update (your |our )?(contact|e-?mail)|please (direct|send|forward|email|contact) .{0,60}@/.test(text)) {
+    return 'wrongemail';
+  }
+  return 'outofoffice';
+}
+const AUTO_REPLY_TAGS = {
+  closed     : 'aivoice_autoreply_closed',
+  wrongemail : 'aivoice_autoreply_wrongemail',
+  outofoffice: 'aivoice_autoreply_outofoffice',
+};
+
+// ─── "Please email X instead" auto-replies ──────────────────────────────────
+const GENERIC_INBOXES = new Set(['info', 'office', 'contact', 'admin', 'support', 'sales', 'hello', 'hi', 'team',
+  'service', 'services', 'reception', 'frontdesk', 'front', 'mail', 'email', 'help', 'billing', 'accounts',
+  'inquiries', 'enquiries', 'inquiry', 'booking', 'bookings', 'dispatch', 'customerservice', 'care', 'main']);
+
+// Finds the address the auto-reply points to. Ignores the sender's own address,
+// our sending domains and no-reply addresses.
+async function findRedirectAddress(msg, enrollment) {
+  const text = `${msg.subject || ''}\n${msg.body || msg.snippet || ''}`;
+  const found = (text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || []).map(e => e.toLowerCase());
+  const { rows } = await pool.query('SELECT email FROM mailboxes');
+  const ourDomains = new Set(rows.map(r => r.email.split('@')[1].toLowerCase()));
+  const sender = String(msg.from || '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+  const skip = new Set([String(enrollment.prospect_email || '').toLowerCase(), sender ? sender[0].toLowerCase() : '']);
+  return found.find(e =>
+    !skip.has(e) &&
+    !ourDomains.has(e.split('@')[1]) &&
+    !/^(no-?reply|do-?not-?reply|mailer-daemon|postmaster)/.test(e)
+  ) || null;
+}
+
+// First name from an address like mike@ or mary.smith@, or null for shared
+// inboxes (info@, office@, or one named after the company).
+function nameFromAddress(email, companyName) {
+  const local = email.split('@')[0].toLowerCase();
+  const first = (local.match(/^([a-z]{2,15})(?:[._-][a-z]+)?$/) || [])[1];
+  if (!first || GENERIC_INBOXES.has(first)) return null;
+  if (String(companyName || '').toLowerCase().split(/[^a-z]+/).includes(first)) return null;
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
+// Points the lead at the new address and restarts the cold sequence from
+// step 1, in a fresh thread. Updates the GHL contact too.
+// Returns false if there's no usable address (the caller then stops the lead).
+async function redirectToNewAddress(enrollment, msg) {
+  const newEmail = await findRedirectAddress(msg, enrollment);
+  if (!newEmail) return false;
+
+  const { rows: dupes } = await pool.query(
+    'SELECT id FROM enrollments WHERE lower(prospect_email) = $1 AND id <> $2 LIMIT 1',
+    [newEmail, enrollment.id]
+  );
+  if (dupes.length) {
+    console.log(`[detect] ${newEmail} is already enrolled (id ${dupes[0].id}), not restarting ${enrollment.id}`);
+    return false;
+  }
+
+  const personName = nameFromAddress(newEmail, enrollment.company_name);
+  await pool.query(
+    `UPDATE enrollments SET
+       prospect_email = $2,
+       prospect_name = $3,
+       phase = 'cold', step = 0, status = 'active',
+       thread_id = NULL, last_message_id = NULL, mailbox = NULL, last_sent_at = NULL,
+       conversation_history = '[]'::jsonb, conv_status = NULL, conv_followup_at = NULL,
+       calendar_sent_at = NULL, positive_reply_at = NULL, demo_page_url = NULL,
+       demo_tested_at = NULL, ultra_warm_pending_at = NULL,
+       next_send_at = NOW()
+     WHERE id = $1`,
+    [enrollment.id, newEmail, personName || enrollment.company_name || '']
+  );
+
+  if (enrollment.contact_id && CRM_API_KEY) {
+    const update = { email: newEmail };
+    if (personName) update.firstName = personName;
+    try {
+      const r = await fetch(`${CRM_API}/contacts/${encodeURIComponent(enrollment.contact_id)}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${CRM_API_KEY}`, Version: '2021-07-28', 'Content-Type': 'application/json' },
+        body: JSON.stringify(update),
+      });
+      if (!r.ok) console.error(`[detect] GHL email update failed (${r.status}):`, await r.text());
+    } catch (e) {
+      console.error('[detect] GHL email update error:', e.message);
+    }
+  }
+
+  console.log(`[detect] ${enrollment.prospect_email} -> redirected to ${newEmail}, cold sequence restarted`);
+  return true;
+}
+
+// Messages already checked and found to be from non-prospects (warm-up, newsletters).
+// Remembered so each run only looks at new mail.
+const seenNonProspect = new Set();
+function rememberNonProspect(id) {
+  seenNonProspect.add(id);
+  if (seenNonProspect.size > 50000) seenNonProspect.delete(seenNonProspect.values().next().value);
+}
+
+// Finds the inbox messages worth processing in one mailbox:
+//  1. replies in a thread we started (includes bounces), and
+//  2. emails from an enrolled prospect that started a NEW thread.
+// Everything else (warm-up traffic etc.) is skipped without downloading it.
+async function collectInbound(mailbox) {
+  const candidates = await listInboxIds(mailbox, { days: 3, maxIds: 500 });
+  if (!candidates.length) return [];
+
+  const threadIds = [...new Set(candidates.map(c => c.threadId))];
+  const { rows: known } = await pool.query(
+    'SELECT thread_id FROM enrollments WHERE thread_id = ANY($1::text[])', [threadIds]
+  );
+  const knownThreads = new Set(known.map(r => r.thread_id));
+
+  const wanted = candidates.filter(c => knownThreads.has(c.threadId));
+  const unknown = candidates.filter(c => !knownThreads.has(c.threadId) && !seenNonProspect.has(c.id));
+
+  // Who sent the unknown-thread emails? (light requests, 10 at a time)
+  const senders = [];
+  for (let i = 0; i < unknown.length; i += 10) {
+    const chunk = await Promise.all(unknown.slice(i, i + 10).map(c =>
+      getSender(mailbox, c.id).catch(() => null)));
+    senders.push(...chunk.filter(Boolean));
+  }
+  if (senders.length) {
+    const { rows: matches } = await pool.query(
+      `SELECT id, lower(prospect_email) AS email FROM enrollments
+        WHERE lower(prospect_email) = ANY($1::text[])
+          AND status NOT IN ('unsubscribed', 'bounced', 'stopped', 'handoff')`,
+      [[...new Set(senders.map(x => x.from))]]
+    );
+    const byEmail = new Map(matches.map(r => [r.email, r.id]));
+    for (const x of senders) {
+      if (byEmail.has(x.from)) wanted.push({ id: x.id, threadId: x.threadId, matchedEnrollmentId: byEmail.get(x.from) });
+      else rememberNonProspect(x.id);
+    }
+  }
+
+  const out = [];
+  for (let i = 0; i < wanted.length; i += 10) {
+    const chunk = await Promise.all(wanted.slice(i, i + 10).map(async w => {
+      try {
+        const msg = await getInboundMessage(mailbox, w.id);
+        if (msg.from.includes(mailbox.toLowerCase())) return null;
+        if (w.matchedEnrollmentId) msg.matchedEnrollmentId = w.matchedEnrollmentId;
+        return msg;
+      } catch (e) {
+        console.error(`[gmail] message read failed for ${w.id} in ${mailbox}: ${e.message}`);
+        return null;
+      }
+    }));
+    out.push(...chunk.filter(Boolean));
+  }
+  return out;
+}
+
 async function detectRepliesAndBounces() {
   detectorStatus.lastStartedAt = new Date().toISOString();
   console.log('[detect] running reply/bounce detection...');
@@ -233,7 +395,7 @@ async function detectRepliesAndBounces() {
 
     for (const { email } of mailboxes) {
       try {
-        const all = await listRecentInbound(email, { days: 3, max: 50 });
+        const all = await collectInbound(email);
 
         // Bounces are handled per message. For real replies, keep only the newest
         // message per thread: the AI reads the full thread, so it answers every
@@ -241,12 +403,15 @@ async function detectRepliesAndBounces() {
         const newestByThread = new Map();
         for (const m of all) {
           if (m.bounced) continue;
-          const prev = newestByThread.get(m.threadId);
-          if (!prev || (m.internalDate || 0) > (prev.internalDate || 0)) newestByThread.set(m.threadId, m);
+          const key = m.matchedEnrollmentId ? 'enr:' + m.matchedEnrollmentId : m.threadId;
+          const prev = newestByThread.get(key);
+          if (!prev || (m.internalDate || 0) > (prev.internalDate || 0)) newestByThread.set(key, m);
         }
-        const messages = all.filter(m => m.bounced || newestByThread.get(m.threadId) === m);
+        const messages = all.filter(m => m.bounced ||
+          newestByThread.get(m.matchedEnrollmentId ? 'enr:' + m.matchedEnrollmentId : m.threadId) === m);
 
         for (const msg of messages) {
+         try {
           msg.body = msg.body || msg.snippet || '';
           // Bounce detection
           if (msg.bounced) {
@@ -297,12 +462,13 @@ Email DND enabled.`
           }
 
           // Find active enrollment so ongoing conversations keep working
+          // Matched by thread, or by sender address when they started a new thread.
           const { rows: enr } = await pool.query(
             `SELECT * FROM enrollments
- WHERE thread_id = $1
+ WHERE ${msg.matchedEnrollmentId ? 'id = $1' : 'thread_id = $1'}
    AND status NOT IN ('unsubscribed', 'bounced', 'stopped', 'handoff')
  LIMIT 1`,
-            [msg.threadId]
+            [msg.matchedEnrollmentId || msg.threadId]
           );
           if (!enr.length) continue;
           let enrollment = enr[0];
@@ -341,6 +507,23 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
   console.log('[detect] ' + enrollment.prospect_email + ' -- duplicate message, skipping');
   continue;
 }
+
+          // Auto-replies: tag the contact by type. A closed business or a dead
+          // address stops all further emails; out-of-office leaves the sequence running.
+          if (msg.autoReply) {
+            const kind = autoReplyKind(msg);
+            console.log(`[detect] ${enrollment.prospect_email} -- auto-reply (${kind}): ${msg.subject}`);
+            if (enrollment.contact_id) await tagContact(enrollment.contact_id, AUTO_REPLY_TAGS[kind]);
+            // "Please email X instead": switch to X and start over.
+            if (kind === 'wrongemail' && await redirectToNewAddress(enrollment, msg)) continue;
+            if (kind === 'closed' || kind === 'wrongemail') {
+              await pool.query(
+                `UPDATE enrollments SET status = 'stopped', ultra_warm_pending_at = NULL WHERE id = $1`,
+                [enrollment.id]
+              );
+            }
+            continue;
+          }
 
           // Booked leads belong to Naman: honour opt-outs, otherwise hand straight to him.
           if (enrollment.status === 'booked') {
@@ -392,6 +575,10 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
 
   await handleConversationalReply(enrollment, msg);
 }
+         } catch (msgErr) {
+          // One bad message must not stop the rest of this mailbox being processed.
+          console.error(`[detect] message ${msg.id} in ${email} failed:`, msgErr.message);
+         }
         }
       } catch (err) {
         console.error(`[detect] failed for ${email}:`, err.message);
@@ -406,6 +593,8 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
 
 module.exports = {
   detectRepliesAndBounces,
+  autoReplyKind,
+  nameFromAddress,
   detectorStatus,
   tagContact,
 
