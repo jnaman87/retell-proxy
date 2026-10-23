@@ -202,6 +202,73 @@ function headerGetter(msg) {
   };
 }
 
+// ─── Auto-reply detection ────────────────────────────────────────────────────
+// Out-of-office, vacation and "we received your email" replies. They must
+// never be treated as a prospect replying.
+function isAutoReply({ subject = '', headers = {} } = {}) {
+  const autoSubmitted = String(headers['auto-submitted'] || '').toLowerCase();
+  if (autoSubmitted && autoSubmitted !== 'no') return true;
+  if (headers['x-autoreply'] || headers['x-autorespond'] || headers['x-autoresponse']) return true;
+  if (/^(auto_reply|bulk|junk)$/i.test(String(headers['precedence'] || '').trim())) return true;
+  return /^\s*(automatic reply|auto[- ]?reply|autoreply|out of (the )?office|ooo\b|vacation|on vacation|away from (the )?office|email received|thank you for (contacting|your email|reaching out)|delivery (status )?notification)/i
+    .test(String(subject).trim());
+}
+
+function autoHeaders(get) {
+  return {
+    'auto-submitted': get('auto-submitted'),
+    'x-autoreply'   : get('x-autoreply'),
+    'x-autorespond' : get('x-autorespond'),
+    'x-autoresponse': get('x-autoresponse'),
+    'precedence'    : get('precedence'),
+  };
+}
+
+// Cheap listing: ids and thread ids only, no message bodies. Pages through up
+// to maxIds results, so busy inboxes (warm-up traffic) can't hide replies.
+async function listInboxIds(mailbox, { days = 3, maxIds = 500 } = {}) {
+  const out = [];
+  let pageToken = '';
+  do {
+    const q = encodeURIComponent(`in:inbox newer_than:${days}d -from:me`);
+    const page = await gmailFetch(
+      mailbox,
+      `/messages?q=${q}&maxResults=100${pageToken ? `&pageToken=${pageToken}` : ''}`
+    );
+    for (const m of page.messages || []) out.push({ id: m.id, threadId: m.threadId });
+    pageToken = page.nextPageToken || '';
+  } while (pageToken && out.length < maxIds);
+  return out.slice(0, maxIds);
+}
+
+// Sender only (light request), used to spot prospects replying in a new thread.
+async function getSender(mailbox, id) {
+  const msg = await gmailFetch(mailbox, `/messages/${id}?format=metadata&metadataHeaders=From`);
+  const from = headerGetter(msg)('from');
+  const m = String(from).match(/<([^>]+)>/);
+  return { id: msg.id, threadId: msg.threadId, from: (m ? m[1] : from).trim().toLowerCase() };
+}
+
+// One message in full, in the shape the reply detector expects.
+async function getInboundMessage(mailbox, id) {
+  const msg  = await gmailFetch(mailbox, `/messages/${id}?format=full`);
+  const get  = headerGetter(msg);
+  const from = get('from').toLowerCase();
+  const subject = get('subject');
+  return {
+    id          : msg.id,
+    threadId    : msg.threadId,
+    from,
+    subject,
+    snippet     : msg.snippet || '',
+    body        : stripQuoted(extractText(msg.payload)) || msg.snippet || '',
+    bounced     : /mailer-daemon|postmaster/.test(from),
+    autoReply   : isAutoReply({ subject, headers: autoHeaders(get) }),
+    labels      : msg.labelIds || [],
+    internalDate: msg.internalDate ? Number(msg.internalDate) : null,
+  };
+}
+
 async function listRecentInbound(mailbox, { days = 3, max = 50 } = {}) {
   const q    = encodeURIComponent(`in:inbox newer_than:${days}d`);
   const list = await gmailFetch(mailbox, `/messages?q=${q}&maxResults=${max}`);
@@ -299,10 +366,11 @@ async function searchMessages(mailbox, query, { maxTotal = 500 } = {}) {
       try {
         const msg = await gmailFetch(
           mailbox,
-          `/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`
+          `/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Auto-Submitted&metadataHeaders=X-Autoreply&metadataHeaders=X-Autorespond&metadataHeaders=Precedence`
         );
         const get = headerGetter(msg);
         return {
+          autoReply   : isAutoReply({ subject: get('subject'), headers: autoHeaders(get) }),
           id          : msg.id,
           threadId    : msg.threadId,
           from        : get('from'),
@@ -322,6 +390,7 @@ async function searchMessages(mailbox, query, { maxTotal = 500 } = {}) {
 
 module.exports = {
   searchMessages,
+  listInboxIds, getSender, getInboundMessage, isAutoReply,
   sendEmail, listRecentInbound, getThreadTranscript, verifyMailbox, verifyAll,
   // exported for tests
   extractText, stripQuoted, htmlToText,
