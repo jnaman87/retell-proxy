@@ -107,13 +107,13 @@ async function moveToDemoTested(enrollment) {
 }
 
 // ─── Drip gap ──────────────────────────────────────────────────
-const DRIP_DELAY_MS = 90 * 1000;
+const DRIP_DELAY_MS = 75 * 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ─── IST date helper ───────────────────────────────────────────
 const IST_DATE_SQL = `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE`;
-const NEW_LEADS_PER_MAILBOX = 4;
-const FOLLOWUPS_PER_MAILBOX = 16;
+const NEW_LEADS_PER_MAILBOX = 5;
+const FOLLOWUPS_PER_MAILBOX = 20;
 function todayIST() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
