@@ -222,7 +222,11 @@ async function handleNegative(enrollment, msg, isUnsub) {
   );
 }
 // Main detection loop
+// Last run times, shown on the reply audit page.
+const detectorStatus = { lastStartedAt: null, lastFinishedAt: null, lastError: null };
+
 async function detectRepliesAndBounces() {
+  detectorStatus.lastStartedAt = new Date().toISOString();
   console.log('[detect] running reply/bounce detection...');
   try {
     const { rows: mailboxes } = await pool.query('SELECT email FROM mailboxes');
@@ -394,12 +398,15 @@ if (processedIds.has(msg.id) || (lastProspect && lastProspect.content === curren
       }
     }
   } catch (err) {
+    detectorStatus.lastError = err.message;
     console.error('[detect] query error:', err.message);
   }
+  detectorStatus.lastFinishedAt = new Date().toISOString();
 }
 
 module.exports = {
   detectRepliesAndBounces,
+  detectorStatus,
   tagContact,
 
   // Re-export these for any other files that may already use them.
