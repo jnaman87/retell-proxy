@@ -121,7 +121,8 @@ function todayIST() {
 // ─── Field sanitizer ───────────────────────────────────────────
 function sanitizeField(value) {
   if (value === null || value === undefined) return '';
-  const v = String(value).trim();
+  // Drop a scraper's "FALLBACK - " / "[FALLBACK]" label, keep the text after it.
+  const v = String(value).replace(/^\s*(?:\[\s*fallback\s*\]|fallback\s*(?:[-:|\u2013\u2014]+|$))\s*/i, '').trim();
   if (!v) return '';
   if (/^(none|n\/a|no\s|not\s|nothing|unavailable)/i.test(v)) return '';
   return v;
