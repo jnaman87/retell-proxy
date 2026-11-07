@@ -1,6 +1,6 @@
 'use strict';
 const pool          = require('./pool');
-const { sendEmail } = require('./gmail-sender');
+const { sendEmail, getThreadTranscript } = require('./gmail-sender');
 const { sendConvFollowUp } = require('./conversationHandler');
 const SEQUENCES     = require('./sequence');
 
@@ -555,13 +555,28 @@ await client.query(
         await client.query('COMMIT');
         client.release();
 
+        // Warm and ultra-warm emails continue an existing conversation, so they
+        // must carry the thread's original subject ("Re: ..."). A different
+        // subject makes Gmail show them as a brand new email, which is what
+        // made them read like fresh outreach. Falls back to the template subject.
+        let sendSubject = subject;
+        if (enrollment.phase !== 'cold' && enrollment.thread_id) {
+          try {
+            const transcript = await getThreadTranscript(mailbox, enrollment.thread_id, { maxMessages: 50 });
+            const original = (transcript.find(m => m.subject) || {}).subject;
+            if (original) sendSubject = /^re:/i.test(original) ? original : 'Re: ' + original;
+          } catch (subjErr) {
+            console.warn(`[loop] could not read thread subject for enrollment ${enrollment.id}: ${subjErr.message}`);
+          }
+        }
+
         let result;
         try {
           result = await sendEmail({
             mailbox,
             fromName  : persona.fullName,
             to        : enrollment.prospect_email,
-            subject,
+            subject   : sendSubject,
             body,
             threadId  : enrollment.thread_id,
             inReplyTo : enrollment.last_message_id,
