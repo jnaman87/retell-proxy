@@ -66,7 +66,7 @@ async function syncGhl(stage) {
   console.log(`[park] GHL done: ${progress.moved} deals moved, ${progress.noDeal} without a deal, ${progress.errors} errors`);
 }
 
-async function parkLeads({ confirm })
+async function parkLeads({ confirm }){
   const stage = await findStage();
   const { rows: byStep } = await pool.query(
     `SELECT step, status, count(*)::int AS leads FROM enrollments WHERE ${TO_PARK} GROUP BY 1, 2 ORDER BY 1, 2`);
