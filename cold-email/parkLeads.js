@@ -66,5 +66,31 @@ async function syncGhl(stage) {
   console.log(`[park] GHL done: ${progress.moved} deals moved, ${progress.noDeal} without a deal, ${progress.errors} errors`);
 }
 
-async function parkLeads({ confirm }) {
-  const stage = await
+async function parkLeads({ confirm })
+  const stage = await findStage();
+  const { rows: byStep } = await pool.query(
+    `SELECT step, status, count(*)::int AS leads FROM enrollments WHERE ${TO_PARK} GROUP BY 1, 2 ORDER BY 1, 2`);
+  const toPark = byStep.reduce((n, r) => n + r.leads, 0);
+  const { rows: [{ n: stayNew }] } = await pool.query(
+    `SELECT count(*)::int AS n FROM enrollments WHERE phase = 'cold' AND status = 'active' AND step = 0`);
+  const { rows: [{ n: alreadyParked }] } = await pool.query(
+    `SELECT count(*)::int AS n FROM enrollments WHERE status = 'parked'`);
+
+  const summary = {
+    stage: stage || 'NOT FOUND: create a stage named "Caught in warmups (To be re-targeted later)" in the Outbound pipeline',
+    willPark: toPark, byStep, alreadyParked,
+    staysAsNewLeads: stayNew,
+    ghlSync: progress,
+  };
+  if (!confirm) return { dryRun: true, note: 'Nothing changed. Add &confirm=yes to park these leads.', ...summary };
+  if (!stage) return { error: 'Stage not found, nothing changed.', ...summary };
+  if (progress.running) return { error: 'A GHL sync is already running. Reload without confirm to watch progress.', ...summary };
+
+  const { rowCount } = await pool.query(
+    `UPDATE enrollments SET status = 'parked', next_send_at = NULL WHERE ${TO_PARK}`);
+  console.log(`[park] ${rowCount} leads parked`);
+  syncGhl(stage).catch(err => { progress.running = false; console.error('[park] GHL sync failed:', err.message); });
+  return { parkedNow: rowCount, note: 'Leads parked. GHL stage moves are running in the background; reload this link without confirm to watch progress.', ...summary, alreadyParked: alreadyParked + rowCount };
+}
+
+module.exports = { parkLeads };
