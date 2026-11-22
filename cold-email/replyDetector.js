@@ -391,8 +391,7 @@ async function detectRepliesAndBounces() {
   detectorStatus.lastStartedAt = new Date().toISOString();
   console.log('[detect] running reply/bounce detection...');
   try {
-    const { rows: mailboxes } = await pool.query('SELECT email FROM mailboxes');
-
+        const { rows: mailboxes } = await pool.query('SELECT email FROM mailboxes WHERE active');
     for (const { email } of mailboxes) {
       try {
         const all = await collectInbound(email);
