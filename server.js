@@ -2300,7 +2300,7 @@ app.get('/admin/reply-audit', async (req, res) => {
   };
 
   const only = String(req.query.mailbox || '').trim().toLowerCase();
-  const { rows: allMailboxes } = await pool.query('SELECT email FROM mailboxes ORDER BY email');
+    const { rows: allMailboxes } = await pool.query('SELECT email FROM mailboxes WHERE active ORDER BY email');
   const mailboxes = only ? allMailboxes.filter(m => m.email.toLowerCase() === only) : allMailboxes;
   const perMailbox = [];
   const missed = [];
@@ -2753,7 +2753,7 @@ async function watchMailbox(email) {
 }
 
 async function watchAllMailboxes() {
-  const { rows } = await pool.query('SELECT email FROM mailboxes');
+    const { rows } = await pool.query('SELECT email FROM mailboxes WHERE active');
   for (const { email } of rows) {
     await watchMailbox(email);
   }
