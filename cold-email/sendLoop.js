@@ -24,6 +24,27 @@ const MAILBOX_PERSONAS = {
   'phil@creativecopyz.net'    : { fullName: 'Phil Jazz',      title: 'Partnership Director' },
   'samuel@creativecopyz.net'         : { fullName: 'Samuel Borne',   title: 'AI Solutions Advisor' },
   'vanessa@creativecopyz.net' : { fullName: 'Vanessa Cruz',   title: 'Client Relations Manager' },
+
+  // New sending mailboxes (from Nov 2026). The ones above are retired: they no longer
+  // send cold email, but replies in their old threads are still answered as them.
+  'anne@creativecopyz.net'     : { fullName: 'Anne Schull',    title: 'Director of Client Solutions' },
+  'brenda@creativecopyz.net'   : { fullName: 'Brenda Cooper',  title: 'Business Development Manager' },
+  'caitlyn@creativecopyz.net'  : { fullName: 'Caitlyn Smoke',  title: 'Account Executive' },
+  'chloe@cretivecopyz.com'     : { fullName: 'Chloe Mac',      title: 'Head of Business Development' },
+  'claire@cretivecopyz.com'    : { fullName: 'Claire Dunphy',  title: 'Partnership Manager' },
+  'gabby@cretivecopyz.com'     : { fullName: 'Gabby Ponting',  title: 'AI Solutions Director' },
+  'emily@ccopyz.net'           : { fullName: 'Emily Hathway',  title: 'Client Success Manager' },
+  'hailey@ccopyz.net'          : { fullName: 'Hailey Henz',    title: 'Account Manager' },
+  'jennifer@ccopyz.net'        : { fullName: 'Jennifer Speed', title: 'Business Development Lead' },
+  'helen@ccopyz.com'           : { fullName: 'Helen Morgan',   title: 'Director of Partnerships' },
+  'jane@ccopyz.com'            : { fullName: 'Jane Albus',     title: 'Director of Sales' },
+  'june@ccopyz.com'            : { fullName: 'June Walker',    title: 'Account Executive' },
+  'hope@ccopyz.org'            : { fullName: 'Hope Garrold',   title: 'Business Development Executive' },
+  'judy@ccopyz.org'            : { fullName: 'Judy Walkway',   title: 'Head of AI Outreach' },
+  'miranda@ccopyz.org'         : { fullName: 'Miranda Ten',    title: 'Senior Account Manager' },
+  'pepper@creativecopyz.org'   : { fullName: 'Pepper Jazz',    title: 'Partnership Director' },
+  'samantha@creativecopyz.org' : { fullName: 'Samantha Borne', title: 'AI Solutions Advisor' },
+  'vanessa@creativecopyz.org'  : { fullName: 'Vanessa Cruz',   title: 'Client Relations Manager' },
 };
 
 function getPersona(mailbox) {
@@ -138,8 +159,8 @@ let capHitIST = null;
 async function pickMailbox() {
   const row = await pool.query(
     `SELECT email FROM mailboxes
-     WHERE daily_reset_at < ${IST_DATE_SQL}
-                OR daily_count < ${NEW_LEADS_PER_MAILBOX}
+     WHERE active AND (daily_reset_at < ${IST_DATE_SQL}
+                OR daily_count < ${NEW_LEADS_PER_MAILBOX})
      ORDER BY last_sent_at NULLS FIRST
      LIMIT 1`
   );
@@ -391,8 +412,8 @@ async function runSendLoop(skipPendingUltraWarm = false) {
                 e.status = 'awaiting_no_reply'
              OR (e.phase = 'cold' AND e.step = 0 AND EXISTS (
                    SELECT 1 FROM mailboxes
-                    WHERE daily_reset_at < ${IST_DATE_SQL}
-                       OR daily_count < ${NEW_LEADS_PER_MAILBOX}))
+                    WHERE active AND (daily_reset_at < ${IST_DATE_SQL}
+                       OR daily_count < ${NEW_LEADS_PER_MAILBOX})))
                           OR e.phase IN ('warm', 'ultra_warm')
              OR (e.phase = 'cold' AND e.step > 0 AND (
                    m.daily_reset_at < ${IST_DATE_SQL}
